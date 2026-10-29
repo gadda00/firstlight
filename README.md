@@ -24,7 +24,7 @@ Deploy your own demo in one click:
 
 ## Operational mode (server, authenticated, real data)
 
-The operational pilot adds (all verified by an automated 52-check browser suite):
+The operational pilot adds (all verified by an automated 59-check browser suite that drives the real UI, not just the API):
 
 - **Persistence** — SQLite pilot store via Prisma (schema designed to migrate to PostgreSQL + PostGIS; see `ARCHITECTURE.md`): organizations, users, sessions, events, asset catalog, ingestion runs/attempts, review tasks + immutable decisions, versioned score configs, sitrep drafts/claims/approvals, export artifacts, offline bundles, and an append-only **SHA-256 audit chain**.
 - **Auth & RBAC** — 192-bit hashed bearer sessions; capability lattice (observer/analyst/reviewer/approver/admin); org isolation; login/logout audited. Pilot uses seeded account tokens; production path is OIDC/SAML (documented seam).
@@ -32,6 +32,7 @@ The operational pilot adds (all verified by an automated 52-check browser suite)
 - **Grounded sitreps** — every number comes from a typed query tool; claims cite catalog asset IDs and carry quality notes; approval **freezes** the claim set by SHA-256 hash (two-person rule: generator ≠ approver).
 - **Scoring v2** — versioned score manifest, area-weighted flood share (true polygon∩hexagon clipping), uncertainty bounds, ±25% sensitivity analysis, missingness penalties, and a `not enough evidence` outcome instead of forced tiers.
 - **Exports & offline bundles v2** — server-built, checksummed, provenance-stamped; bundles carry per-layer checksums, expiry, and revocation with import-side validation.
+- **Operational web UI** — after login the browser renders the server-built layer directly: the event selector lists the org's events, the map/overview/zones/access panels render the server-computed decision layer, and Review/Sitrep/Export are dedicated server-workflow panels (version-guarded decisions with required reasons, two-person sitrep approval with claim-freeze, checksummed export downloads). The browser composes nothing itself — the layer endpoint is losslessly typed so the client renders exactly what the server computed.
 
 ### Run the operational pilot locally
 
@@ -42,14 +43,16 @@ bunx prisma db push                       # create the schema
 bun run db:seed                           # org + one user per role (tokens printed)
 DEMO_MODE=false NEXT_PUBLIC_DEMO_MODE=false bun run build
 DEMO_MODE=false DATABASE_URL=file:$(pwd)/db/firstlight.db bun run start
-# → http://localhost:3000  (login gate; use the seeded analyst account)
+# → http://localhost:3000  (login gate; use the seeded analyst account.
+#    After login the full UI runs on server data: event selector, map,
+#    review queue, sitrep approval, exports.)
 ```
 
 Smoke the whole operational workflow end-to-end (real browser, real USGS/NWS calls):
 
 ```bash
 bun run build:static && DEMO_MODE=false NEXT_PUBLIC_DEMO_MODE=false bun run build
-python3 scripts/browser-smoke.py          # 52 checks: login→ingest→review→sitrep→approve→export→bundle→audit
+python3 scripts/browser-smoke.py          # 59 checks: login→ingest→review→sitrep→approve→export→bundle→audit + UI wiring
 ```
 
 ### Repository verification gates
@@ -57,7 +60,7 @@ python3 scripts/browser-smoke.py          # 52 checks: login→ingest→review�
 ```bash
 bun run lint        # eslint — 0 errors
 bun run typecheck   # tsc --noEmit — HARD gate (ignoreBuildErrors removed in Phase 0)
-bun test            # 130 unit + integration + contract tests
+bun test            # 148 unit + integration + contract tests
 bun run build       # operational build (type-validated)
 bun run build:static  # demo build (API route excluded — a static build never ships a server)
 ```

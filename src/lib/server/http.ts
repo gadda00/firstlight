@@ -113,11 +113,15 @@ export function errorResponse(err: unknown, requestId: string): Response {
       details: err.issues.map((i) => ({ path: i.path.join('.'), message: i.message })),
     };
   } else {
-    // Never leak internals (provider URLs, SQL, stack traces) to clients.
-    if (process.env.NODE_ENV !== 'production') {
-      console.error(`[${requestId}]`, err);
+    // Server-side logs only — the client envelope never sees internals
+    // (provider URLs, SQL, stack traces). Production keeps enough context
+    // (name + message + stack) to actually debug; the response body stays
+    // generic either way.
+    if (err instanceof Error) {
+      console.error(`[${requestId}] ${err.name}: ${err.message}`);
+      if (err.stack) console.error(err.stack);
     } else {
-      console.error(`[${requestId}]`, err instanceof Error ? err.name : 'unknown error');
+      console.error(`[${requestId}]`, err);
     }
   }
   // Envelope contract: { "error": { code, message, requestId, … } }
@@ -164,12 +168,34 @@ export async function parseBody<T>(
  */
 const buckets = new Map<string, { windowStart: number; count: number }>();
 
+/** Buckets whose window closed more than this long ago are dead entries. */
+const SWEEP_AGE_MS = 5 * 60_000;
+let lastSweepAt = 0;
+
+/** Drop long-dead buckets so the map stays bounded over a long-running
+ * node (a client that never returns would otherwise leak its entry forever).
+ * Exported for tests; rateLimit() invokes it lazily at most once a minute. */
+export function sweepRateLimitBuckets(now = Date.now()): number {
+  let removed = 0;
+  for (const [key, b] of buckets) {
+    if (now - b.windowStart > SWEEP_AGE_MS) {
+      buckets.delete(key);
+      removed++;
+    }
+  }
+  return removed;
+}
+
 export function rateLimit(
   key: string,
   limit: number,
   windowMs: number,
 ): { allowed: boolean; retryAfterSec: number } {
   const now = Date.now();
+  if (now - lastSweepAt > 60_000) {
+    lastSweepAt = now;
+    sweepRateLimitBuckets(now);
+  }
   const b = buckets.get(key);
   if (!b || now - b.windowStart >= windowMs) {
     buckets.set(key, { windowStart: now, count: 1 });

@@ -513,3 +513,186 @@ describe('offline bundle v2', () => {
     expect(v.staleWarnings.some((w) => w.includes('EXPIRED'))).toBe(true);
   });
 });
+
+/* ------------------------------------------------- auth hardening (v2.2) */
+
+describe('auth hardening — timing + enumeration + pruning', () => {
+  test('unknown email and wrong token yield the IDENTICAL error (anti-enumeration)', async () => {
+    const { login, sha256 } = await import('@/lib/server/auth');
+    const org = await seedOrg();
+    const email = `enum-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@t.test`;
+    await db.user.create({
+      data: {
+        orgId: org.id,
+        email,
+        name: 'Enum Test',
+        role: 'analyst',
+        tokenHash: sha256('real-token'),
+      },
+    });
+    const errs: string[] = [];
+    // Unknown account.
+    try {
+      await login(db, 'does-not-exist@t.test', 'whatever');
+    } catch (e) {
+      errs.push((e as Error).message);
+    }
+    // Unknown account, but the CORRECT secret for someone else.
+    try {
+      await login(db, 'does-not-exist@t.test', 'real-token');
+    } catch (e) {
+      errs.push((e as Error).message);
+    }
+    // Existing account, wrong secret.
+    try {
+      await login(db, email, 'wrong-token');
+    } catch (e) {
+      errs.push((e as Error).message);
+    }
+    // All failures must be indistinguishable.
+    expect(new Set(errs).size).toBe(1);
+    expect(errs[0]).toBe('Unknown account or invalid token');
+  });
+
+  test('login prunes sessions that expired more than 7 days ago', async () => {
+    const { login, sha256 } = await import('@/lib/server/auth');
+    const org = await seedOrg();
+    const user = await db.user.create({
+      data: {
+        orgId: org.id,
+        email: `prune-${Date.now()}@t.test`,
+        name: 'Prune Test',
+        role: 'analyst',
+        tokenHash: sha256('prune-token'),
+      },
+    });
+    // A long-dead session and a live one.
+    await db.session.create({
+      data: {
+        userId: user.id,
+        tokenHash: sha256('dead-session'),
+        expiresAt: new Date(Date.now() - 10 * 86400_000),
+      },
+    });
+    await db.session.create({
+      data: {
+        userId: user.id,
+        tokenHash: sha256('recent-session'),
+        expiresAt: new Date(Date.now() - 2 * 86400_000), // expired but recent — kept
+      },
+    });
+    await login(db, user.email, 'prune-token');
+    const dead = await db.session.findUnique({ where: { tokenHash: sha256('dead-session') } });
+    const recent = await db.session.findUnique({ where: { tokenHash: sha256('recent-session') } });
+    expect(dead).toBeNull();      // pruned
+    expect(recent).not.toBeNull(); // within retention — survives
+  });
+});
+
+/* ---------------------------------- full-router dispatch (envelope + layer) */
+
+describe('dispatch — authenticated layer endpoint round trip', () => {
+  test('GET /api/events/:id/layer returns the lossless layer through the real router', async () => {
+    const { login, sha256 } = await import('@/lib/server/auth');
+    const org = await seedOrg();
+    const user = await db.user.create({
+      data: {
+        orgId: org.id,
+        email: `layer-${Date.now()}@t.test`,
+        name: 'Layer Test',
+        role: 'observer',
+        tokenHash: sha256('layer-token'),
+      },
+    });
+    const ev = await seedEvent(org.id, user.id);
+    const { bearer } = await login(db, user.email, 'layer-token');
+
+    const { dispatch } = await import('@/server/api/router');
+    const res = await dispatch(
+      new Request(`https://x.test/api/events/${ev.id}/layer`, {
+        headers: { authorization: `Bearer ${bearer}` },
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get('x-request-id')).toBeTruthy();
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    const json = (await res.json()) as { data: Record<string, unknown> };
+
+    // Envelope + event metadata.
+    expect(json.data.event).toBeDefined();
+    expect(json.data.manifest).toBeDefined();
+    expect((json.data.demo as { simulated: boolean }).simulated).toBe(true);
+
+    // LOSSLESS: the fields the client store needs to reconstruct the layer.
+    const zones = json.data.zones as Array<Record<string, unknown>>;
+    expect(zones.length).toBeGreaterThan(5);
+    for (const z of zones.slice(0, 3)) {
+      expect(z.needLower).toBeDefined();
+      expect(z.dataQuality).toBeDefined();
+      expect(z.undamaged).toBeDefined();
+      expect(z.critCount).toBeDefined();
+      expect(z.exposureMethod).toBeDefined();
+      expect(z.boundary).toBeDefined();
+    }
+    const roads = json.data.roads as Array<Record<string, unknown>>;
+    expect(roads.length).toBeGreaterThan(0);
+    for (const r of roads.slice(0, 3)) {
+      expect(r.nodes).toBeDefined();
+      expect(r.lengthKm).toBeDefined();
+      expect(r.speedKmh).toBeDefined();
+    }
+    const buildings = json.data.buildings as Array<Record<string, unknown>>;
+    expect(buildings.length).toBeGreaterThan(0);
+    expect(buildings[0].footprint).toBeDefined();
+    expect(buildings[0].areaM2).toBeDefined();
+    const facilities = json.data.facilities as Array<Record<string, unknown>>;
+    expect(facilities[0].node).toBeDefined();
+    expect((json.data.popGrid as unknown[]).length).toBeGreaterThan(0);
+    expect((json.data.meta as Record<string, unknown>).id).toBeDefined();
+    expect(json.data.stats).toBeDefined();
+  });
+
+  test('unauthenticated layer request gets a proper 401 envelope (never a 500)', async () => {
+    const { dispatch } = await import('@/server/api/router');
+    const res = await dispatch(new Request('https://x.test/api/events/whatever/layer'));
+    expect(res.status).toBe(401);
+    const json = (await res.json()) as { error: { code: string; requestId: string } };
+    expect(json.error.code).toBe('unauthorized');
+    expect(json.error.requestId).toBeTruthy();
+  });
+
+  test('cross-org event access is a 404 (existence hiding) through the router', async () => {
+    const { login, sha256 } = await import('@/lib/server/auth');
+    const orgA = await seedOrg();
+    const orgB = await seedOrg();
+    const userA = await db.user.create({
+      data: {
+        orgId: orgA.id,
+        email: `iso-a-${Date.now()}@t.test`,
+        name: 'Iso A',
+        role: 'observer',
+        tokenHash: sha256('iso-token-a'),
+      },
+    });
+    const userB = await db.user.create({
+      data: {
+        orgId: orgB.id,
+        email: `iso-b-${Date.now()}@t.test`,
+        name: 'Iso B',
+        role: 'observer',
+        tokenHash: sha256('iso-token-b'),
+      },
+    });
+    const evB = await seedEvent(orgB.id, userB.id);
+    const { bearer } = await login(db, userA.email, 'iso-token-a');
+    const { dispatch } = await import('@/server/api/router');
+    const res = await dispatch(
+      new Request(`https://x.test/api/events/${evB.id}/layer`, {
+        headers: { authorization: `Bearer ${bearer}` },
+      }),
+    );
+    expect(res.status).toBe(404);
+    const json = (await res.json()) as { error: { code: string } };
+    expect(json.error.code).toBe('not_found');
+  });
+});

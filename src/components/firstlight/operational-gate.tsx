@@ -12,16 +12,12 @@ import { ShieldCheck, AlertTriangle, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-
-export interface AuthenticatedSession {
-  user: { name: string; role: string };
-  token: string;
-}
+import type { ClientSession } from '@/lib/firstlight/server-client';
 
 export function OperationalGate({
   onAuthenticated,
 }: {
-  onAuthenticated: (s: AuthenticatedSession) => void;
+  onAuthenticated: (s: ClientSession) => void;
 }) {
   const [email, setEmail] = useState('analyst@firstlight.example');
   const [token, setToken] = useState('');
@@ -39,14 +35,14 @@ export function OperationalGate({
         body: JSON.stringify({ email, token }),
       });
       const json = (await res.json()) as {
-        data?: { token: string; user: { name: string; role: string } };
+        data?: { token: string; user: { id: string; name: string; role: string; email: string } };
         error?: { message: string };
       };
       if (!res.ok || !json.data) {
         setError(json.error?.message ?? `Login failed (${res.status})`);
         return;
       }
-      onAuthenticated({ user: json.data.user, token: json.data.token });
+      onAuthenticated({ token: json.data.token, user: json.data.user });
     } catch {
       setError('Network error — is the operational server running?');
     } finally {

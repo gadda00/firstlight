@@ -15,12 +15,28 @@
  * cross-tenant object access returns 404 (not 403) to avoid existence leaks.
  * ========================================================================== */
 
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { PrismaClient, Session, User } from '@prisma/client';
 import { errors } from './http';
 import type { Role } from './schemas';
 
 export const SESSION_TTL_MS = 24 * 60 * 60 * 1000; // 24 h
+
+/** Retention for closed sessions before pruning (7 days, for audit recall). */
+const PRUNE_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** Constant-time comparison of two hex digests. Same length is guaranteed by
+ * construction (both are sha256 hex); the length check satisfies Node's
+ * timingSafeEqual contract without leaking which check failed. */
+function hashEquals(a: string, b: string): boolean {
+  const ab = Buffer.from(a, 'hex');
+  const bb = Buffer.from(b, 'hex');
+  return ab.length === bb.length && timingSafeEqual(ab, bb);
+}
+
+/** Compared when the account does not exist so the login path always runs
+ * exactly one hash comparison — prevents user-enumeration via timing. */
+const DUMMY_HASH = sha256('firstlight-timing-decoy');
 
 export function sha256(s: string): string {
   return createHash('sha256').update(s).digest('hex');
@@ -87,16 +103,22 @@ export function requireCapability(ctx: AuthContext, cap: Capability): void {
   }
 }
 
-/** Login: verify the account token hash, mint a session bearer token. */
+/** Login: verify the account token hash (timing-safe, non-enumerating),
+ * mint a session bearer token, and opportunistically prune long-expired
+ * sessions so the table cannot grow without bound. */
 export async function login(
   db: PrismaClient,
   email: string,
   token: string,
 ): Promise<{ bearer: string; user: User }> {
   const user = await db.user.findUnique({ where: { email } });
-  if (!user || user.revokedAt) throw errors.unauthorized('Unknown or revoked account');
-  if (!user.tokenHash || user.tokenHash !== sha256(token)) {
-    throw errors.unauthorized('Invalid account token');
+  // ALWAYS run one hash comparison, even for unknown accounts (timing).
+  const candidateHash = user?.tokenHash ?? DUMMY_HASH;
+  const valid = Boolean(user?.tokenHash) && hashEquals(sha256(token), candidateHash);
+  if (!user || user.revokedAt || !valid) {
+    // Single unified message: unknown account and bad token are
+    // indistinguishable to the caller (anti-enumeration).
+    throw errors.unauthorized('Unknown account or invalid token');
   }
   const bearer = newBearerToken();
   await db.session.create({
@@ -106,6 +128,15 @@ export async function login(
       expiresAt: new Date(Date.now() + SESSION_TTL_MS),
     },
   });
+  // Opportunistic prune (best-effort, never blocks login on failure):
+  // sessions that expired more than PRUNE_AFTER_MS ago are dead state.
+  try {
+    await db.session.deleteMany({
+      where: { expiresAt: { lt: new Date(Date.now() - PRUNE_AFTER_MS) } },
+    });
+  } catch {
+    /* pruning is advisory */
+  }
   return { bearer, user };
 }
 

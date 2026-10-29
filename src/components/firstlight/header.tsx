@@ -1,14 +1,17 @@
-/* FirstLight — top header: identity, event selector, KPI pills, status. */
+/* FirstLight — top header: identity, event selector, KPI pills, status.
+ * Operational mode: server events + session chip + sign-out. */
 
 'use client';
 
-import { Activity, Github, Radio } from 'lucide-react';
+import { Activity, Github, LogOut, Radio } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { EVENTS } from '@/lib/firstlight/events';
 import { useFirstLight } from '@/store/firstlight';
 import { fmtInt } from '@/lib/firstlight/geo';
 import { demoModeEnabled } from '@/lib/firstlight/mode';
+import { getSession, serverLogout } from '@/lib/firstlight/server-client';
 
 export function Header() {
   const eventId = useFirstLight((s) => s.eventId);
@@ -16,7 +19,11 @@ export function Header() {
   const decision = useFirstLight((s) => s.decision);
   const raw = useFirstLight((s) => s.raw);
   const phase = useFirstLight((s) => s.phase);
+  const serverEvents = useFirstLight((s) => s.serverEvents);
+  const activeServerEventId = useFirstLight((s) => s.activeServerEventId);
+  const loadServerEvent = useFirstLight((s) => s.loadServerEvent);
   const isDemo = demoModeEnabled();
+  const session = isDemo ? null : getSession();
 
   const s = decision?.stats;
   const event = raw?.meta;
@@ -55,32 +62,69 @@ export function Header() {
           </div>
         </div>
 
-        {/* event selector */}
+        {/* event selector — demo catalog or the org's server events */}
         <div className="flex items-center gap-2 ml-2 lg:ml-6">
-          <Select
-            value={eventId}
-            onValueChange={(v) => loadEvent(v)}
-            disabled={phase === 'running'}
-          >
-            <SelectTrigger className="w-[190px] sm:w-[250px] h-9 bg-zinc-900 border-zinc-700 text-sm">
-              <div className="flex items-center gap-2 truncate">
-                <Activity className="h-3.5 w-3.5 text-amber-400 shrink-0" />
-                <SelectValue />
-              </div>
-            </SelectTrigger>
-            <SelectContent className="bg-zinc-900 border-zinc-700">
-              {EVENTS.map((e) => (
-                <SelectItem key={e.id} value={e.id} className="text-sm">
-                  <div className="flex items-center gap-2">
-                    <span className="uppercase text-[9px] font-bold tracking-wider text-amber-400 border border-amber-500/40 rounded px-1 py-px">
-                      {e.archetype}
-                    </span>
-                    {e.name}
+          {isDemo ? (
+            <Select
+              value={eventId}
+              onValueChange={(v) => loadEvent(v)}
+              disabled={phase === 'running'}
+            >
+              <SelectTrigger className="w-[190px] sm:w-[250px] h-9 bg-zinc-900 border-zinc-700 text-sm">
+                <div className="flex items-center gap-2 truncate">
+                  <Activity className="h-3.5 w-3.5 text-amber-400 shrink-0" />
+                  <SelectValue />
+                </div>
+              </SelectTrigger>
+              <SelectContent className="bg-zinc-900 border-zinc-700">
+                {EVENTS.map((e) => (
+                  <SelectItem key={e.id} value={e.id} className="text-sm">
+                    <div className="flex items-center gap-2">
+                      <span className="uppercase text-[9px] font-bold tracking-wider text-amber-400 border border-amber-500/40 rounded px-1 py-px">
+                        {e.archetype}
+                      </span>
+                      {e.name}
+                    </div>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : (
+            <Select
+              value={activeServerEventId ?? eventId}
+              onValueChange={(v) => {
+                void loadServerEvent(v).catch(() => undefined);
+              }}
+              disabled={phase === 'running'}
+            >
+              <SelectTrigger className="w-[190px] sm:w-[250px] h-9 bg-zinc-900 border-zinc-700 text-sm">
+                <div className="flex items-center gap-2 truncate">
+                  <Activity className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
+                  <SelectValue placeholder="Select an event…" />
+                </div>
+              </SelectTrigger>
+              <SelectContent className="bg-zinc-900 border-zinc-700">
+                {serverEvents.length === 0 && (
+                  <div className="px-3 py-2 text-xs text-zinc-500">
+                    No events in this organization yet
                   </div>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+                )}
+                {serverEvents.map((e) => (
+                  <SelectItem key={e.id} value={e.id} className="text-sm">
+                    <div className="flex items-center gap-2">
+                      <span className="uppercase text-[9px] font-bold tracking-wider text-emerald-400 border border-emerald-500/40 rounded px-1 py-px">
+                        {e.archetype}
+                      </span>
+                      <span className="truncate">{e.name}</span>
+                      <span className="text-[9px] font-mono text-zinc-500">
+                        {e.status}
+                      </span>
+                    </div>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
           {event && (
             <span className="hidden xl:block text-[11px] text-zinc-500 font-mono truncate max-w-[240px]">
               {event.location} · post {event.postDate}
@@ -116,7 +160,7 @@ export function Header() {
           </div>
         )}
 
-        {/* status + demo badge */}
+        {/* status + mode badge + session */}
         <div className="flex items-center gap-2 shrink-0">
           <span className="hidden md:flex items-center gap-1.5 text-[10px] font-semibold tracking-wider text-emerald-400">
             <Radio className="h-3 w-3 animate-pulse" />
@@ -132,6 +176,31 @@ export function Header() {
           >
             {isDemo ? '⚠ SIMULATED DEMO DATA' : 'AUTHENTICATED · LABELED SOURCES'}
           </Badge>
+          {session && (
+            <>
+              <span className="hidden lg:inline-flex items-center gap-1.5 text-[10px] font-semibold text-zinc-400 border border-zinc-700 rounded px-2 py-1">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                <span className="text-zinc-200">{session.user.name}</span>
+                <span className="uppercase text-[9px] tracking-wider text-emerald-400">
+                  {session.user.role}
+                </span>
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 px-2 text-[10px] border-zinc-700 bg-zinc-900 text-zinc-400 hover:text-zinc-100 hover:border-zinc-500"
+                onClick={() => {
+                  void serverLogout().then(() => {
+                    window.location.reload();
+                  });
+                }}
+                aria-label="Sign out"
+              >
+                <LogOut className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Sign out</span>
+              </Button>
+            </>
+          )}
           <a
             href="https://github.com/gadda00/firstlight"
             target="_blank"

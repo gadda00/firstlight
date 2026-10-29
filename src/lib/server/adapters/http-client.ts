@@ -48,6 +48,16 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+/** Release an unread response body so the underlying connection returns to
+ * the keep-alive pool instead of leaking until GC (matters under retries). */
+async function discardBody(res: Response): Promise<void> {
+  try {
+    await res.body?.cancel();
+  } catch {
+    /* already closed */
+  }
+}
+
 function assertAllowedHost(url: string, allowedHosts: readonly string[]): URL {
   let parsed: URL;
   try {
@@ -112,6 +122,7 @@ export async function resilientFetch(url: string, opts: FetchOpts): Promise<Fetc
       lastStatus = res.status;
       const contentType = res.headers.get('content-type') ?? '';
       if (res.status === 429 || res.status >= 500) {
+        await discardBody(res); // release the connection before sleeping
         const retryAfter = Number(res.headers.get('retry-after') ?? '0');
         if (res.status === 429 && retryAfter > 0 && attempt < retries) {
           await sleep(Math.min(30_000, retryAfter * 1000));
@@ -124,9 +135,11 @@ export async function resilientFetch(url: string, opts: FetchOpts): Promise<Fetc
       }
       if (!res.ok) {
         // 4xx (other than 429): permanent — do not retry.
+        await discardBody(res);
         throw errors.upstream(`Provider responded ${res.status}`, false);
       }
       if (expectedContentType && !contentType.includes(expectedContentType)) {
+        await discardBody(res);
         throw errors.upstream(
           `Unexpected content-type '${contentType}' (expected ${expectedContentType})`,
           false,
@@ -135,6 +148,7 @@ export async function resilientFetch(url: string, opts: FetchOpts): Promise<Fetc
       // Bounded read: Content-Length pre-check + streaming accumulation.
       const declared = Number(res.headers.get('content-length') ?? '0');
       if (declared && declared > maxBytes) {
+        await discardBody(res);
         throw errors.tooLarge(
           `Provider response exceeds ${maxBytes} bytes (${declared})`,
         );

@@ -6,7 +6,7 @@ FirstLight supports humanitarian logistics, damage assessment, access analysis, 
 
 ## 2. Authentication model (honest status)
 
-**Pilot (current):** out-of-band account tokens seeded by `prisma/seed.ts`, stored as SHA-256 hashes; login mints 192-bit bearer tokens (also hash-stored). Sessions: 24 h TTL, server-side revocation on logout, per-request expiry check. This is a demo-grade credential mechanism for the open-data pilot and is labeled as such in the login UI and login response.
+**Pilot (current):** out-of-band account tokens seeded by `prisma/seed.ts`, stored as SHA-256 hashes; login mints 192-bit bearer tokens (also hash-stored). Sessions: 24 h TTL, server-side revocation on logout, per-request expiry check, and opportunistic pruning of sessions that expired more than 7 days ago (so the table cannot grow without bound). Login credential comparison is **timing-safe** (`crypto.timingSafeEqual` against a constant decoy hash when the account does not exist) and unknown-account vs wrong-token failures return the **identical** error — no user enumeration via timing or message. This is a demo-grade credential mechanism for the open-data pilot and is labeled as such in the login UI and login response.
 
 **Production path (designed seam):** OIDC/SAML with MFA. Only `login()` in `src/lib/server/auth.ts` changes — sessions, the capability lattice, and every resolver's checks stay identical. All five pilot roles (observer/analyst/reviewer/approver/admin) already exercise the production lattice.
 
@@ -21,7 +21,7 @@ FirstLight supports humanitarian logistics, damage assessment, access analysis, 
 - Server build sets `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin`, `Permissions-Policy` (camera/mic off).
 - Uniform error envelope: machine `code`, safe `message`, `requestId`; internals (SQL, provider URLs, stack traces) never leak to clients (logged server-side only).
 - Zod validation at every boundary; 64 KB body cap; method allowlist.
-- Fixed-window rate limiting: 20/min on auth endpoints, 300/min general (in-memory; Redis is the documented scale seam).
+- Fixed-window rate limiting: 20/min on auth endpoints, 300/min general (in-memory with lazy sweeping of dead buckets so the limiter's memory stays bounded; Redis is the documented scale seam).
 
 ## 5. Provider egress (SSRF & supply chain)
 

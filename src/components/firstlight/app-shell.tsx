@@ -16,7 +16,11 @@ import { SitrepPanel } from './panels/sitrep';
 import { ReviewPanel } from './panels/review';
 import { ExportPanel } from './panels/export';
 import { DataPanel } from './panels/data';
+import { OperationalReviewPanel } from './panels/op-review';
+import { OperationalSitrepPanel } from './panels/op-sitrep';
+import { OperationalExportPanel } from './panels/op-export';
 import { useFirstLight } from '@/store/firstlight';
+import { demoModeEnabled } from '@/lib/firstlight/mode';
 
 const MapView = dynamic(() => import('./map/map-view'), {
   ssr: false,
@@ -32,7 +36,8 @@ const MapView = dynamic(() => import('./map/map-view'), {
 
 export function AppShell() {
   const decision = useFirstLight((s) => s.decision);
-  const pending = decision?.stats.pendingReview ?? 0;
+  const isDemo = demoModeEnabled();
+  const pendingReview = decision?.stats.pendingReview ?? 0;
 
   return (
     <div className="min-h-screen lg:h-screen flex flex-col bg-zinc-950 text-zinc-100 overflow-hidden">
@@ -58,8 +63,8 @@ export function AppShell() {
                 value="review"
                 icon={<ClipboardCheck className="h-3.5 w-3.5" />}
                 label="Review"
-                count={pending || undefined}
-                alert={Boolean(pending)}
+                count={pendingReview || undefined}
+                alert={Boolean(pendingReview)}
               />
               <TabTrigger value="export" icon={<Download className="h-3.5 w-3.5" />} label="Export" />
               <TabTrigger value="data" icon={<Database className="h-3.5 w-3.5" />} label="Data" />
@@ -75,13 +80,13 @@ export function AppShell() {
                 <AccessPanel />
               </TabsContent>
               <TabsContent value="sitrep" className="m-0">
-                <SitrepPanel />
+                {isDemo ? <SitrepPanel /> : <OperationalSitrepPanel />}
               </TabsContent>
               <TabsContent value="review" className="m-0">
-                <ReviewPanel />
+                {isDemo ? <ReviewPanel /> : <OperationalReviewPanel />}
               </TabsContent>
               <TabsContent value="export" className="m-0">
-                <ExportPanel />
+                {isDemo ? <ExportPanel /> : <OperationalExportPanel />}
               </TabsContent>
               <TabsContent value="data" className="m-0">
                 <DataPanel />
@@ -141,6 +146,8 @@ function StatusBar() {
   const decision = useFirstLight((s) => s.decision);
   const runId = useFirstLight((s) => s.runId);
   const phase = useFirstLight((s) => s.phase);
+  const serverError = useFirstLight((s) => s.serverError);
+  const isDemo = demoModeEnabled();
 
   const stageTotal = raw?.stages.reduce((a, st) => a + st.ms, 0) ?? 0;
   const blocked = raw?.roads.filter((r) => r.blocked).length ?? 0;
@@ -151,19 +158,37 @@ function StatusBar() {
         <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
         {phase === 'running' ? 'PROCESSING' : 'ONLINE'}
       </span>
+      {serverError && (
+        <span className="text-red-400 border border-red-500/30 bg-red-500/10 rounded px-1.5 py-px">
+          SERVER ERROR: {serverError.slice(0, 80)}
+        </span>
+      )}
       {decision && (
         <>
           <span className="hidden sm:inline">
             {decision.zones.length} H3 zones · {raw?.roads.length ?? 0} road segments ({blocked} blocked)
           </span>
-          <span className="hidden md:inline">
-            pipeline {(stageTotal / 1000).toFixed(1)}s demo-scaled
-          </span>
+          {!isDemo && (
+            <span className="hidden md:inline">
+              server-built layer · scores recomputed server-side
+            </span>
+          )}
+          {isDemo && (
+            <span className="hidden md:inline">
+              pipeline {(stageTotal / 1000).toFixed(1)}s demo-scaled
+            </span>
+          )}
         </>
       )}
       <span className="flex-1" />
       <span className="hidden lg:inline">{runId}</span>
-      <span>FirstLight v2.1 · simulated demo data</span>
+      <span>
+        {isDemo
+          ? 'FirstLight v2.2 · simulated demo data'
+          : raw?.demo
+            ? 'FirstLight v2.2 · OPERATIONAL · layer carries a labeled synthetic demo overlay'
+            : 'FirstLight v2.2 · OPERATIONAL · server-built data'}
+      </span>
       <span className="hidden md:inline">
         © OpenStreetMap contributors · Esri · CARTO
       </span>

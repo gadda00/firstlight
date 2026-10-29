@@ -8,11 +8,13 @@ import { Database, ShieldAlert, Satellite, Users, Waypoints, Building } from 'lu
 import { Badge } from '@/components/ui/badge';
 import { useFirstLight } from '@/store/firstlight';
 import { fmtInt } from '@/lib/firstlight/geo';
+import { demoModeEnabled } from '@/lib/firstlight/mode';
 
 export function DataPanel() {
   const raw = useFirstLight((s) => s.raw);
   const decision = useFirstLight((s) => s.decision);
   const reviewDecisions = useFirstLight((s) => s.reviewDecisions);
+  const isDemo = demoModeEnabled();
 
   if (!raw || !decision) return <div className="p-4 text-xs text-zinc-500">Loading…</div>;
 
@@ -28,10 +30,30 @@ export function DataPanel() {
           </span>
         </div>
         <p className="text-[10px] leading-relaxed text-zinc-400">
-          Prototype on public benchmarks (xBD, Sen1Floods11), then transition to
-          commercially clean data + pilot labels. This demo SIMULATES all
-          footprints — no real imagery or population data is processed.
-          Verify every license before shipping derivative products.
+          {isDemo ? (
+            <>
+              Prototype on public benchmarks (xBD, Sen1Floods11), then transition
+              to commercially clean data + pilot labels. This demo SIMULATES all
+              footprints — no real imagery or population data is processed.
+              Verify every license before shipping derivative products.
+            </>
+          ) : raw.demo ? (
+            <>
+              Operational event carrying a <b>labeled synthetic layer</b> — the
+              analysis layer below is demo-scenario content (provider{' '}
+              <code>{raw.demo.provider}</code>, seed {raw.demo.seed}), applied
+              with an explicit opt-in at event creation. Real hazard metadata
+              ingested via the adapters is cataloged with license records; the
+              raster processing phase is deferred (see DATA_SOURCES.md). Scores
+              and review state ARE server-authoritative.
+            </>
+          ) : (
+            <>
+              Operational event — layers are built server-side from the asset
+              catalog with license records and quality notes attached. Verify
+              every license before shipping derivative products.
+            </>
+          )}
         </p>
       </div>
 
@@ -118,8 +140,9 @@ export function DataPanel() {
 
       <p className="text-[9px] text-zinc-600 leading-relaxed font-mono">
         Base map: Esri World Imagery / CARTO dark (attribution in map footer).
-        Demo labels every artifact with its source, timestamp, sensor, resolution,
-        quality flags, license class, and processing version.
+        {isDemo
+          ? ' Demo labels every artifact with its source, timestamp, sensor, resolution, quality flags, license class, and processing version.'
+          : ' Every artifact in the catalog carries source, timestamp, license, checksum, and quality notes — see the Data tab of the API catalog.'}
       </p>
     </div>
   );

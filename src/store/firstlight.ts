@@ -17,6 +17,11 @@ import {
 } from '@/lib/firstlight/decision';
 import { generateSitrep, type SitrepResult } from '@/lib/firstlight/sitrep';
 import { fnv1a } from '@/lib/firstlight/rng';
+import {
+  fetchEventLayer,
+  listEvents,
+  type ServerEventSummary,
+} from '@/lib/firstlight/server-client';
 import type {
   DamageClass,
   EventDecisionData,
@@ -57,7 +62,16 @@ export interface FirstLightState {
   swipe: boolean;
   baseStyle: 'satellite' | 'dark';
 
+  /* Operational-mode state (demo builds leave these untouched/null). */
+  serverEvents: ServerEventSummary[];
+  activeServerEventId: string | null;
+  activeServerEventName: string | null;
+  serverBusy: boolean;
+  serverError: string | null;
+
   loadEvent: (eventId: string) => void;
+  loadServerEvents: () => Promise<ServerEventSummary[]>;
+  loadServerEvent: (eventId: string) => Promise<void>;
   setStage: (i: number) => void;
   finishPipeline: () => void;
   setWeights: (w: NeedWeights) => void;
@@ -117,6 +131,12 @@ export const useFirstLight = create<FirstLightState>((set, get) => ({
   swipe: true,
   baseStyle: 'satellite',
 
+  serverEvents: [],
+  activeServerEventId: null,
+  activeServerEventName: null,
+  serverBusy: false,
+  serverError: null,
+
   loadEvent: (eventId) => {
     clearTimers();
     const meta = eventById(eventId);
@@ -158,6 +178,57 @@ export const useFirstLight = create<FirstLightState>((set, get) => ({
     pipelineTimers.push(
       setTimeout(() => set({ phase: 'done' }), acc + 260),
     );
+  },
+
+  /* ------------------------------------------------- operational-mode loaders */
+
+  /** List the org's events from the server (requires a stored session). */
+  loadServerEvents: async () => {
+    const events = await listEvents();
+    set({ serverEvents: events });
+    return events;
+  },
+
+  /** Load a server event's decision layer — the server is the source of
+   * truth; the browser renders exactly what it received (scores, review
+   * state, provenance) and never recomputes the baseline. */
+  loadServerEvent: async (eventId) => {
+    clearTimers();
+    set({
+      phase: 'running',
+      stageIndex: 0,
+      raw: null,
+      decision: null,
+      routes: [],
+      selectedZoneId: null,
+      sitrep: null,
+      sitrepApprovedBy: null,
+      reviewDecisions: new Map(),
+      reviewClasses: new Map(),
+      serverBusy: true,
+      serverError: null,
+      activeServerEventId: eventId,
+    });
+    try {
+      const { raw, decision, event } = await fetchEventLayer(eventId);
+      set({
+        eventId: event.id,
+        activeServerEventName: event.name,
+        raw,
+        decision,
+        runId: `srv-${event.id.slice(0, 8)}`,
+        phase: 'done',
+        stageIndex: raw.stages.length,
+        serverBusy: false,
+      });
+    } catch (err) {
+      set({
+        phase: 'idle',
+        serverBusy: false,
+        serverError: err instanceof Error ? err.message : 'Layer load failed',
+      });
+      throw err;
+    }
   },
 
   setStage: (i) => set({ stageIndex: i }),

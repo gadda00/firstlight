@@ -148,6 +148,12 @@ paths:
   /api/events/{id}/layer:
     get:
       summary: Computed decision layer (scoring v2 — uncertainty, data quality, closures)
+      description: >-
+        Losslessly serialized — the response carries the complete typed layer
+        (meta, buildings incl. footprints, roads incl. graph nodes/oneway,
+        facilities, popGrid, floods, stages, full zones, stats, manifest) so
+        clients render exactly what the server computed. The only non-JSON
+        member (zoneIndex Map) is rebuilt client-side from zones.
       parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
       responses:
         "200": { description: Zones + facilities + roads + floods + manifest }

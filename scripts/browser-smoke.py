@@ -282,6 +282,28 @@ def main() -> int:
         time.sleep(4)
         check("browser renders the app shell after login", page.locator("text=DISASTER INTELLIGENCE").count() > 0)
         check("header shows OPERATIONAL badge", page.locator("text=v2.2 OPERATIONAL").count() > 0)
+        # v2.2 wiring: the shell now loads SERVER data after login —
+        # most-recent event layer → status bar + header session chip.
+        check("header shows the signed-in user chip", page.locator("text=Dana Okafor").count() > 0)
+        try:
+            page.wait_for_selector("text=H3 zones", timeout=20_000)
+            zones_loaded = True
+        except Exception:
+            zones_loaded = False
+        check("server-built layer renders (H3 zones in status bar)", zones_loaded)
+        check("status bar labels the layer as server-built", page.locator("text=server-built").count() > 0)
+        check("status bar carries the honest operational data label", page.locator("text=OPERATIONAL").count() > 0)
+        # operational panels: review queue + sitrep + exports hit the API
+        page.locator("[role=tab]").filter(has_text="Review").click()
+        time.sleep(1.5)
+        check("review tab renders the SERVER review queue", page.locator("text=SERVER REVIEW QUEUE").count() > 0)
+        page.locator("[role=tab]").filter(has_text="Sitrep").click()
+        time.sleep(1.5)
+        check("sitrep tab renders the server sitrep workflow", page.locator("text=SERVER-COMPOSED").count() > 0)
+        page.locator("[role=tab]").filter(has_text="Export").click()
+        time.sleep(1.5)
+        check("export tab renders the server export workflow", page.locator("text=SERVER-BUILT EXPORTS").count() > 0)
+        page.locator("[role=tab]").filter(has_text="Overview").click()
         browser.close()
 
     # -- logout revokes

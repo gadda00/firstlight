@@ -195,7 +195,9 @@ export async function dispatch(req: Request): Promise<Response> {
     });
   }
 
-  const auth = match.route.auth === 'public' ? await authenticate(db, req) : await authenticate(db, req);
+  // Resolve the session when presented (public routes may still use it for
+  // identity); protected routes re-check with requireAuth inside the envelope.
+  const auth = await authenticate(db, req);
   const ctx: RequestContext = { req, requestId, segments, auth };
   paramBag.set(ctx, match.params);
 
