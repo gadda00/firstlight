@@ -1,0 +1,107 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Lint · Typecheck · Test · Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      # Frozen install ONLY. A missing/out-of-date lockfile is a CI failure —
+      # there is deliberately NO `|| bun install` fallback (see
+      # IMPLEMENTATION_BASELINE.md §6). Commit bun.lock with every dependency
+      # change.
+      - name: Install dependencies (frozen lockfile)
+        run: bun install --frozen-lockfile
+
+      - name: Lint
+        run: bun run lint
+
+      # Hard type gate — mirrors the local `bun run typecheck` script and the
+      # `ignoreBuildErrors: false` build setting. Never soften this step.
+      - name: Typecheck (tsc --noEmit)
+        run: bun run typecheck
+
+      - name: Unit + integration + contract tests
+        run: bun test
+
+      - name: Operational server build (type-validated)
+        run: bun run build
+        env:
+          DEMO_MODE: "false"
+
+      - name: Static demo build (API route excluded)
+        run: bun run build:static
+
+  e2e:
+    name: Browser smoke (operational + demo modes)
+    runs-on: ubuntu-latest
+    needs: verify
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies (frozen lockfile)
+        run: bun install --frozen-lockfile
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Playwright + Chromium
+        run: |
+          pip install playwright
+          playwright install chromium --with-deps
+
+      - name: Prepare database
+        run: |
+          bunx prisma db push
+          bun run db:seed
+        env:
+          DATABASE_URL: "file:${{ github.workspace }}/db/firstlight.db"
+
+      - name: Build both modes
+        run: |
+          bun run build:static
+          DEMO_MODE=false NEXT_PUBLIC_DEMO_MODE=false bun run build
+        env:
+          DATABASE_URL: "file:${{ github.workspace }}/db/firstlight.db"
+
+      # Server + test must share one step (background processes do not
+      # survive between steps on hosted runners).
+      - name: Run browser smoke (login → live ingest → review → sitrep → approve → export → bundle → audit)
+        run: |
+          DEMO_MODE=false DATABASE_URL="file:${{ github.workspace }}/db/firstlight.db" bun run start -- -p 3001 &
+          SERVER_PID=$!
+          for i in $(seq 1 40); do curl -s -o /dev/null http://localhost:3001/api/health && break; sleep 1; done
+          FIRSTLIGHT_BASE_URL=http://localhost:3001 python3 scripts/browser-smoke.py
+          EXIT=$?
+          kill $SERVER_PID 2>/dev/null || true
+          exit $EXIT
+        env:
+          DATABASE_URL: "file:${{ github.workspace }}/db/firstlight.db"

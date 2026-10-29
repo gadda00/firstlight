@@ -19,7 +19,9 @@ dist/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-bun.lock*
+# NOTE: bun.lock is COMMITTED on purpose — CI installs with
+# --frozen-lockfile and there is deliberately no fallback.
+tsconfig.tsbuildinfo
 
 # vercel
 .vercel
@@ -31,3 +33,6 @@ next-env.d.ts
 # prisma
 db/
 prisma/*.db
+# runtime test databases + interrupted-build stash
+tests/fixtures/*.db
+.api-stash/

@@ -5,7 +5,9 @@
 
 export type DamageClass = 'none' | 'minor' | 'major' | 'destroyed';
 export type EventArchetype = 'hurricane' | 'flood' | 'earthquake';
-export type AlertTier = 'warning' | 'watch' | 'informational';
+/** 'insufficient_evidence' = not enough data to rank — never silently
+ *  presented as "informational" (see scoring.ts). */
+export type AlertTier = 'warning' | 'watch' | 'informational' | 'insufficient_evidence';
 export type FacilityType =
   | 'hospital'
   | 'school'
@@ -69,6 +71,17 @@ export interface Building {
   truthCorrect: boolean; // seeded ground-truth flag (demo benchmarking only)
 }
 
+/** Time-stamped closure observation — replaces the bare `blocked` boolean.
+ *  kind: hard = impassable; probable = likely impassable; reduced_speed =
+ *  passable with delay; unverified = hazard reported, needs field check. */
+export interface RoadClosure {
+  observedAt: string;
+  source: string;
+  confidence: number;
+  kind: 'hard' | 'probable' | 'reduced_speed' | 'unverified';
+  expiresAt?: string | null;
+}
+
 export interface RoadSegment {
   id: string;
   coords: [number, number][]; // polyline [lng, lat]
@@ -80,6 +93,10 @@ export interface RoadSegment {
   confidence: number;
   /** graph node ids [start, end] */
   nodes: [string, string];
+  /** Directed edge (OSM oneway): traversal only start → end. */
+  oneway?: boolean;
+  /** Structured closure observation when blocked/affected. */
+  closure?: RoadClosure;
 }
 
 export interface Facility {
@@ -118,6 +135,14 @@ export interface PipelineStage {
   ms: number;
 }
 
+/** Stamp applied by the DemoScenarioProvider to every synthetic dataset. */
+export interface DemoProvenance {
+  provider: 'demo-scenario-provider';
+  simulated: true;
+  seed: number;
+  generatedAt: string;
+}
+
 export interface EventRawData {
   meta: EventMeta;
   buildings: Building[];
@@ -127,6 +152,8 @@ export interface EventRawData {
   floods: FloodPolygon[];
   stages: PipelineStage[];
   totalPop: number;
+  /** Present iff this dataset came from the DemoScenarioProvider. */
+  demo?: DemoProvenance;
 }
 
 /** H3 zone with decision-layer component scores. */
@@ -156,7 +183,26 @@ export interface Zone {
   isolated: boolean;
   preHospitalMin: number;
   postHospitalMin: number;
-  floodShare: number; // fraction of zone area under water
+  floodShare: number; // fraction of zone area under water (legacy point sampler)
+  /** Area-weighted flood share (polygon∩hexagon area ratio) — scoring v2. */
+  floodShareArea: number;
+  /** Detection confidence mean in this zone (0..1). */
+  meanConfidence: number;
+  /** Input coverage quality (0..1) — drives missingness penalty + evidence tier. */
+  dataQuality: number;
+  /** 1 − dataQuality. */
+  missingness: number;
+  /** Need-score bounds from confidence propagation (scoring v2). */
+  needLower: number;
+  needUpper: number;
+  /** Max rank shift under ±25% one-at-a-time weight perturbation. */
+  sensitivity: number;
+  /** True when ranking is fragile (rank shifts ≥ 2). */
+  rankingUnstable: boolean;
+  /** 'insufficient' → tier reported as insufficient_evidence. */
+  evidenceTier: 'sufficient' | 'insufficient';
+  /** Labeled exposure method id used for affectedPop (see SCORING_METHOD.md). */
+  exposureMethod: string;
   rank: number;
 }
 
@@ -165,6 +211,12 @@ export interface NeedWeights {
   w2: number; // population
   w3: number; // isolation
   w4: number; // critical facilities
+}
+
+/** Human-review state applied on top of model detections. */
+export interface ReviewOverrides {
+  decisions: Map<string, ReviewDecision>;
+  newClasses: Map<string, DamageClass>;
 }
 
 export interface RouteResult {
@@ -178,6 +230,12 @@ export interface RouteResult {
   usesFlaggedSegments: boolean;
   blockedEdgesAvoided: number;
   confidence: number;
+  /** Route-data honesty (Phase 3): closures crossed are itemized, and a
+   *  route through unverified/probable closures demands field verification
+   *  before dispatch — it is never presented as "safe". */
+  closuresCrossed: Array<{ roadId: string; kind: string; confidence: number }>;
+  requiresFieldVerification: boolean;
+  graphVersion: string;
 }
 
 export interface EventDecisionData {
@@ -200,6 +258,11 @@ export interface EventDecisionData {
     meanConfidence: number;
     pendingReview: number;
     aoiKm2: number;
+    /** Scoring-v2 stats. */
+    zonesInsufficientEvidence: number;
+    meanDataQuality: number;
+    rankingUnstableZones: number;
+    meanFloodConfidence: number;
   };
   routes: RouteResult[]; // computed on demand
 }

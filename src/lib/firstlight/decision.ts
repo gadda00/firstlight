@@ -1,16 +1,38 @@
 /* ==========================================================================
- * FirstLight — Decision Layer (blueprint Layer 4).
- * H3 res-8 zoning, need scores, travel-time isolation analysis, routing.
- *   need(z) = w1·D(z) + w2·Pexp(z) + w3·Iso(z) + w4·Crit(z)
- *   D(z)   = (1.0·n_destroyed + 0.6·n_major + 0.2·n_minor) / n_total
- *   Pexp   = affected_population / max_zone_population
- *   Iso    = 1 if travel-time delta to nearest hospital > 30 min or unreachable
- *   Crit   = impacted critical facilities / max_zone_impacted
+ * FirstLight — Decision Layer (blueprint Layer 4, productionized in Phase 3).
+ *
+ *   need(z) = [w1·D(z) + w2·Pexp(z) + w3·Iso(z) + w4·Crit(z)] / Σw
+ *             × (1 − missingPenalty · missingness(z))
+ *   D(z)    = (1.0·n_destroyed + 0.6·n_major + 0.2·n_minor) / n_total
+ *   Pexp    = zone population / divisor  (max or p90robust — see manifest)
+ *   Iso     = 1 if travel-time delta to nearest hospital > 30 min or unreachable
+ *   Crit    = impacted critical facilities / divisor
+ *
+ * Scoring v2 additions (all governed by a versioned ScoreManifest — see
+ * scoring.ts and SCORING_METHOD.md):
+ *   - area-weighted flood share (true polygon∩hexagon area, clip.ts)
+ *   - need uncertainty bounds (confidence propagation)
+ *   - sensitivity (±25% one-at-a-time weight perturbation → rank shifts)
+ *   - dataQuality / missingness per zone
+ *   - 'insufficient_evidence' outcome instead of forcing a tier
+ *   - labeled, uncalibrated exposure heuristic for affected population
  * ========================================================================== */
 
 import { cellToBoundary, cellToLatLng, latLngToCell, polygonToCells } from 'h3-js';
 import { RoadGraph } from './graph';
 import { offset, pointInRing, clamp } from './geo';
+import { areaWeightedShare } from './clip';
+import {
+  DEFAULT_SCORE_MANIFEST,
+  damageBounds,
+  evidenceTierFor,
+  needBounds,
+  normalizationDivisor,
+  percentile,
+  sensitivityAnalysis,
+  tierFor,
+  type ScoreManifest,
+} from './scoring';
 import type {
   Building,
   DamageClass,
@@ -19,17 +41,13 @@ import type {
   Facility,
   NeedWeights,
   ReviewDecision,
+  ReviewOverrides,
   RoadSegment,
   RouteResult,
   Zone,
 } from './types';
 
 export const H3_RES = 8;
-
-export interface ReviewOverrides {
-  decisions: Map<string, ReviewDecision>;
-  newClasses: Map<string, DamageClass>;
-}
 
 export const DEFAULT_WEIGHTS: NeedWeights = {
   w1: 0.35,
@@ -43,12 +61,6 @@ function effectiveDamage(b: Building, ov: ReviewOverrides): DamageClass {
   if (d === 'rejected') return 'none';
   if (d === 'reclassified') return ov.newClasses.get(b.id) ?? b.damage;
   return b.damage;
-}
-
-function tierFor(need: number): Zone['tier'] {
-  if (need >= 0.58) return 'warning';
-  if (need >= 0.38) return 'watch';
-  return 'informational';
 }
 
 /** Dijkstra from multiple virtual sources (hospitals) in one run. */
@@ -65,6 +77,7 @@ export function computeDecision(
   raw: EventRawData,
   weights: NeedWeights,
   overrides: ReviewOverrides,
+  manifest: ScoreManifest = DEFAULT_SCORE_MANIFEST,
 ): EventDecisionData {
   const { meta } = raw;
   const A = meta.aoiKm;
@@ -93,6 +106,8 @@ export function computeDecision(
       population: number;
       critCount: number;
       critImpacted: number;
+      confSum: number;
+      confCount: number;
     }
   >();
   const agg = (id: string) => {
@@ -106,6 +121,8 @@ export function computeDecision(
         population: 0,
         critCount: 0,
         critImpacted: 0,
+        confSum: 0,
+        confCount: 0,
       };
       zoneAgg.set(id, z);
     }
@@ -118,6 +135,8 @@ export function computeDecision(
     const z = agg(zid);
     const dmg = effectiveDamage(b, overrides);
     z.buildings++;
+    z.confSum += b.confidence;
+    z.confCount++;
     if (dmg === 'destroyed') z.destroyed++;
     else if (dmg === 'major') z.major++;
     else if (dmg === 'minor') z.minor++;
@@ -158,8 +177,13 @@ export function computeDecision(
     f.isolated = (f.status === 'offline') || (wasReachable && (!nowReachable || f.postTravelMin - f.preTravelMin > 30));
   }
 
-  /* ---- flood share per zone ---- */
+  /* ---- flood shares per zone: legacy point sampler (compat) + true
+   *      area-weighted intersection (scoring v2) ---- */
   const rings = raw.floods.map((f) => f.ring);
+  const meanFloodConf =
+    raw.floods.length > 0
+      ? raw.floods.reduce((s, f) => s + f.confidence, 0) / raw.floods.length
+      : 1;
   const floodShare = (boundary: [number, number][], centroid: { lng: number; lat: number }): number => {
     if (!rings.length) return 0;
     let hit = 0;
@@ -174,8 +198,13 @@ export function computeDecision(
   };
 
   /* ---- zone assembly ---- */
+  // Union of the H3 cells covering the AOI and any cell that actually holds
+  // data (population grid / facilities can sit in edge cells whose center
+  // falls outside the AOI ring — their data must never be silently dropped).
+  const zoneIds = new Set<string>(cells);
+  for (const id of zoneAgg.keys()) zoneIds.add(id);
   const zones: Zone[] = [];
-  for (const id of cells) {
+  for (const id of zoneIds) {
     const a = zoneAgg.get(id);
     if (!a) continue;
     const boundary = cellToBoundary(id, true) as unknown as [number, number][];
@@ -190,6 +219,19 @@ export function computeDecision(
         ? (a.destroyed + 0.6 * a.major + 0.2 * a.minor) / a.buildings
         : 0;
     const share = floodShare(boundary, centroid);
+    const shareArea = areaWeightedShare(boundary, rings);
+    const meanConfidence = a.confCount > 0 ? a.confSum / a.confCount : 0.5;
+    const popAvailable = a.population > 0;
+    const routable = Number.isFinite(postHospitalMin);
+    // Data quality (documented formula, SCORING_METHOD.md §missingness):
+    // detection confidence, population availability, routability.
+    const dataQuality = clamp(
+      (a.buildings > 0 ? meanConfidence : 0.4) * 0.5 +
+        (popAvailable ? 1 : 0.3) * 0.3 +
+        (routable ? 1 : 0.5) * 0.2,
+      0,
+      1,
+    );
     zones.push({
       id,
       boundary,
@@ -213,26 +255,60 @@ export function computeDecision(
       preHospitalMin,
       postHospitalMin,
       floodShare: share,
+      floodShareArea: shareArea,
+      meanConfidence,
+      dataQuality,
+      missingness: 1 - dataQuality,
+      needLower: 0,
+      needUpper: 0,
+      sensitivity: 0,
+      rankingUnstable: false,
+      evidenceTier: 'sufficient',
+      exposureMethod: manifest.exposureMethod,
       rank: 0,
     });
   }
 
-  const maxPop = Math.max(1, ...zones.map((z) => z.population));
-  const maxCrit = Math.max(1, ...zones.map((z) => z.critImpacted));
+  // Normalization under the manifest policy ('max' legacy / 'p90robust').
+  const popDivisor = normalizationDivisor(
+    zones.map((z) => z.population),
+    manifest.normalization,
+  );
+  const critDivisor = normalizationDivisor(
+    zones.map((z) => z.critImpacted),
+    manifest.normalization,
+  );
 
   for (const z of zones) {
-    z.Pexp = z.population / maxPop;
+    z.Pexp = clamp(z.population / popDivisor, 0, 1);
     const delta = z.postHospitalMin - z.preHospitalMin;
     const unreachable = z.postHospitalMin > 90 && z.preHospitalMin <= 90;
     z.isolated = unreachable || delta > 30;
     z.Iso = z.isolated ? 1 : 0;
-    z.Crit = z.critImpacted / maxCrit;
-    z.affectedPop = Math.round(
-      z.population * clamp(z.D * 1.5 + z.floodShare * 0.75, 0, 1),
+    z.Crit = clamp(z.critImpacted / critDivisor, 0, 1);
+    // Exposure estimate — LABELED UNCALIBRATED PILOT HEURISTIC:
+    // v1  : point-sampled floodShare (legacy compat)
+    // v2-a: area-weighted floodShareArea (default)
+    // Never presented as a measurement; see SCORING_METHOD.md.
+    const floodComponent =
+      manifest.exposureMethod === 'heuristic-weighted-overlay-v1'
+        ? z.floodShare
+        : z.floodShareArea;
+    z.affectedPop = Math.min(
+      Math.round(
+        z.population *
+          clamp(
+            manifest.exposureCoefficients.damage * z.D +
+              manifest.exposureCoefficients.flood * floodComponent,
+            0,
+            1,
+          ),
+      ),
+      Math.floor(z.population),
     );
   }
 
-  scoreZones(zones, weights);
+  scoreZones(zones, weights, manifest);
 
   /* ---- event-level stats ---- */
   const totalBuildings = zones.reduce((s, z) => s + z.buildings, 0);
@@ -245,6 +321,7 @@ export function computeDecision(
   const meanConfidence =
     raw.buildings.reduce((s, b) => s + b.confidence, 0) /
     Math.max(1, raw.buildings.length);
+  const meanFloodConfNote = meanFloodConf;
 
   const stats: EventDecisionData['stats'] = {
     totalBuildings,
@@ -265,23 +342,72 @@ export function computeDecision(
       (b) => b.reviewReason && !overrides.decisions.has(b.id),
     ).length,
     aoiKm2: (2 * A) ** 2,
+    zonesInsufficientEvidence: zones.filter((z) => z.evidenceTier === 'insufficient').length,
+    meanDataQuality: zones.length
+      ? zones.reduce((s, z) => s + z.dataQuality, 0) / zones.length
+      : 1,
+    rankingUnstableZones: zones.filter((z) => z.rankingUnstable).length,
+    meanFloodConfidence: meanFloodConfNote,
   };
 
   const zoneIndex = new Map(zones.map((z) => [z.id, z]));
   return { zones, zoneIndex, stats, routes: [] };
 }
 
-/** Apply weights, recompute need + tiers + ranks in place. */
-export function scoreZones(zones: Zone[], weights: NeedWeights): void {
+/** Apply weights, need + tiers + ranks + uncertainty + sensitivity in place.
+ *  (Kept backward-compatible: the store calls this with weights only.) */
+export function scoreZones(
+  zones: Zone[],
+  weights: NeedWeights,
+  manifest: ScoreManifest = DEFAULT_SCORE_MANIFEST,
+): void {
+  applyScores(zones, weights, manifest);
+  // Sensitivity: ±25% one-at-a-time perturbations of each weight.
+  if (zones.length > 1) {
+    const shifts = sensitivityAnalysis(zones, weights, (zs, w) =>
+      applyScores(zs, w, manifest),
+    );
+    for (const z of zones) {
+      z.sensitivity = shifts.get(z.id) ?? 0;
+      z.rankingUnstable = z.sensitivity >= 2;
+    }
+  }
+}
+
+/** Pure need/tier/rank pass — also used inside the sensitivity loop. */
+function applyScores(zones: Zone[], weights: NeedWeights, manifest: ScoreManifest): void {
   const sum = weights.w1 + weights.w2 + weights.w3 + weights.w4;
   const n = sum > 0 ? sum : 1;
   const w1 = weights.w1 / n;
   const w2 = weights.w2 / n;
   const w3 = weights.w3 / n;
   const w4 = weights.w4 / n;
+  const popUnc = manifest.populationUncertainty;
   for (const z of zones) {
-    z.need = w1 * z.D + w2 * z.Pexp + w3 * z.Iso + w4 * z.Crit;
-    z.tier = tierFor(z.need);
+    // Missingness penalty: sparse data lowers the score AND is flagged —
+    // sparse mapping must not look like low impact.
+    const penalty = 1 - manifest.missingPenalty * z.missingness;
+    z.need = (w1 * z.D + w2 * z.Pexp + w3 * z.Iso + w4 * z.Crit) * penalty;
+    // Uncertainty bounds (confidence propagation, documented method).
+    const bounds = needBounds(
+      {
+        D: damageBounds(z.D, z.meanConfidence),
+        Pexp: [
+          Math.max(0, z.Pexp * (1 - popUnc)),
+          Math.min(1, z.Pexp * (1 + popUnc)),
+        ],
+        Iso: [z.Iso, z.Iso],
+        Crit: [z.Crit, z.Crit],
+      },
+      weights,
+    );
+    z.needLower = Math.max(0, bounds.lower * penalty);
+    z.needUpper = Math.min(1, bounds.upper * penalty);
+    z.evidenceTier = evidenceTierFor(z.dataQuality, manifest);
+    z.tier =
+      z.evidenceTier === 'insufficient'
+        ? 'insufficient_evidence'
+        : tierFor(z.need, manifest.tierThresholds);
   }
   const sorted = [...zones].sort((a, b) => b.need - a.need);
   sorted.forEach((z, i) => (z.rank = i + 1));
@@ -339,6 +465,20 @@ export function computeRoute(
     usesFlaggedSegments: flagged,
     blockedEdgesAvoided: avoided,
     confidence: roadIds.length ? confSum / roadIds.length : 1,
+    closuresCrossed: roadIds
+      .map((rid) => roadsById.get(rid))
+      .filter((rd): rd is RoadSegment => Boolean(rd?.closure))
+      .map((rd) => ({
+        roadId: rd.id,
+        kind: rd.closure!.kind,
+        confidence: rd.closure!.confidence,
+      })),
+    requiresFieldVerification: roadIds.some((rid) => {
+      const rd = roadsById.get(rid);
+      if (!rd?.closure) return false;
+      return rd.closure.kind === 'unverified' || rd.closure.kind === 'probable';
+    }),
+    graphVersion: `demo-road-graph-v2:${raw.meta.id}`,
   };
 }
 
@@ -346,3 +486,6 @@ export function computeRoute(
 export function dispatchOrigins(facilities: Facility[]): Facility[] {
   return facilities.filter((f) => f.type === 'fire_station');
 }
+
+/** Percentile helper re-export for callers building score reports. */
+export { percentile };

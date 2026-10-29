@@ -1,0 +1,293 @@
+openapi: 3.1.0
+info:
+  title: FirstLight Operational API
+  version: 2.2.0
+  description: >
+    Disaster-intelligence workspace API (open-data pilot). Humanitarian logistics,
+    damage assessment, access analysis, and operational briefing only — no targeting,
+    no offensive intelligence, no surveillance of individuals, no autonomous dispatch.
+    Every response is either { "data": ... } or
+    { "error": { code, message, requestId, retryable?, details? } }.
+  license:
+    name: MIT (code); data under each provider's license (see DATA_SOURCES.md)
+
+servers:
+  - url: /
+
+security:
+  - bearerAuth: []
+
+paths:
+  /api/meta:
+    get:
+      summary: Run mode, provider health manifest, ethics statement
+      security: []
+      responses:
+        "200":
+          description: OK
+  /api/health:
+    get:
+      summary: Never-throw health probe (ok | degraded + diagnostics)
+      security: []
+      responses:
+        "200":
+          description: OK (degraded payloads still return 200 with status=degraded)
+
+  /api/auth/login:
+    post:
+      summary: Pilot credential login (production: OIDC/SAML seam)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, token]
+              properties:
+                email: { type: string, format: email }
+                token: { type: string, minLength: 8, maxLength: 256 }
+      responses:
+        "200": { description: Bearer token + user }
+        "401": { description: Invalid credentials }
+        "429": { description: Rate limited (20/min) }
+  /api/auth/logout:
+    post:
+      summary: Revoke the current session server-side
+      responses:
+        "200": { description: Revoked }
+
+  /api/me:
+    get:
+      summary: Current user + effective capability map
+      responses:
+        "200": { description: OK }
+
+  /api/events:
+    get:
+      summary: List events (organization-scoped)
+      responses:
+        "200": { description: Events with counts }
+    post:
+      summary: Create an event workspace (capability: createEvent)
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, archetype, country, location, center]
+              properties:
+                name: { type: string, minLength: 3 }
+                archetype: { type: string, enum: [hurricane, flood, earthquake] }
+                country: { type: string }
+                location: { type: string }
+                center:
+                  type: object
+                  properties:
+                    lat: { type: number }
+                    lng: { type: number }
+                aoiKm: { type: number, minimum: 2, maximum: 30, default: 10 }
+                incidentTime: { type: string, format: date-time }
+                severity: { type: number, minimum: 0, maximum: 1 }
+                demoLayer: { type: boolean, default: true }
+      responses:
+        "201": { description: Created (+ bootstrapped review tasks when demoLayer) }
+        "403": { description: Missing capability }
+
+  /api/events/{id}:
+    get:
+      summary: Event detail + aggregate counts + current sitrep pointer
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        "200": { description: OK }
+        "404": { description: Not found in caller's organization }
+    patch:
+      summary: Lifecycle transition (capability: createEvent)
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+                  enum: [draft, ingesting, processing, review, approved, published, archived]
+      responses:
+        "200": { description: Updated }
+        "409": { description: Illegal transition }
+
+  /api/events/{id}/ingest:
+    post:
+      summary: Run a data-source adapter (capability: runIngestion)
+      description: Idempotent per (event, adapter, params); only SUCCEEDED runs replay.
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [adapterId]
+              properties:
+                adapterId: { type: string }
+                params: { type: object, additionalProperties: true }
+      responses:
+        "200": { description: Run result + stage logs + provider manifest }
+        "503":
+          description: blocked_dependency (e.g. FIRSTLIGHT_FIRMS_TOKEN missing — never simulated)
+        "502": { description: Upstream provider error }
+
+  /api/events/{id}/catalog:
+    get:
+      summary: Data catalog — assets with license, age, quality, simulated flag + run logs
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        "200": { description: Catalog }
+
+  /api/events/{id}/layer:
+    get:
+      summary: Computed decision layer (scoring v2 — uncertainty, data quality, closures)
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        "200": { description: Zones + facilities + roads + floods + manifest }
+
+  /api/events/{id}/review/tasks:
+    get:
+      summary: Review queue with immutable decision history
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: status, in: query, schema: { type: string, enum: [open, in_review, decided] } }
+      responses:
+        "200": { description: Tasks }
+
+  /api/review/tasks/{id}/decide:
+    post:
+      summary: Record an immutable review decision (capability: reviewDecide)
+      description: Requires a reason (min 4 chars) and the task's current version (optimistic concurrency).
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision, reason, version]
+              properties:
+                decision: { type: string, enum: [confirmed, rejected, reclassified] }
+                newClass: { type: string, enum: [none, minor, major, destroyed] }
+                reason: { type: string, minLength: 4 }
+                notes: { type: string }
+                version: { type: integer, minimum: 1 }
+      responses:
+        "201": { description: Decision recorded }
+        "400": { description: Validation failed (reason required) }
+        "409": { description: stale_version }
+
+  /api/events/{id}/sitrep:
+    get:
+      summary: Sitrep draft versions
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        "200": { description: Drafts with approval state }
+  /api/events/{id}/sitrep/generate:
+    post:
+      summary: Generate a draft from durable state via typed claim tools (capability: generateSitrep)
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        "201": { description: Draft with claims + markdown }
+
+  /api/sitrep/{id}/approve:
+    post:
+      summary: Freeze the claim set (capability: approveSitrep; approver must differ from generator)
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expectedVersion]
+              properties:
+                expectedVersion: { type: integer, minimum: 1 }
+                reason: { type: string }
+      responses:
+        "200": { description: Frozen }
+        "409": { description: Stale version | already approved | two-person rule }
+
+  /api/events/{id}/exports:
+    get:
+      summary: List export artifacts + bundles
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        "200": { description: Artifacts }
+    post:
+      summary: Build an export (capability: createExport; sitrep.md requires approval)
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind]
+              properties:
+                kind:
+                  type: string
+                  enum: [damage.geojson, flood.geojson, zones.geojson, roads.geojson, routes.geojson, zones.csv, sitrep.md, audit.json, offline-bundle]
+      responses:
+        "201": { description: Built export with sha256 }
+        "409": { description: sitrep.md without approval }
+
+  /api/events/{id}/bundle:
+    post:
+      summary: Build offline bundle v2 (capability: createExport)
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                ttlHours: { type: integer, minimum: 1, maximum: 720, default: 72 }
+      responses:
+        "201": { description: Bundle with manifest + layer checksums }
+
+  /api/bundle/{id}/import:
+    post:
+      summary: Validate a presented bundle (checksums, expiry, revocation, staleness)
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        "200": { description: Validation result }
+  /api/bundle/{id}/revoke:
+    post:
+      summary: Revoke a bundle (capability: approveSitrep)
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        "200": { description: Revoked }
+
+  /api/audit:
+    get:
+      summary: Audit chain tail (capability: readAudit)
+      parameters: [{ name: limit, in: query, schema: { type: integer, maximum: 200 } }]
+      responses:
+        "200": { description: Events }
+  /api/audit/verify:
+    post:
+      summary: Verify the full SHA-256 chain (capability: readAudit)
+      responses:
+        "200": { description: Verification }
+
+  /api/score-configs:
+    get:
+      summary: List versioned score profiles
+      responses:
+        "200": { description: Configs }
+    post:
+      summary: Publish a new versioned score profile (capability: publishScoreConfig — admin)
+      responses:
+        "201": { description: Created }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: 192-bit session token from /api/auth/login (hash-stored, server-revocable, 24 h TTL)

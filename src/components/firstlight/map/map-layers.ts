@@ -122,6 +122,8 @@ export function overlayLayers(): LayerSpecification[] {
           'rgba(248,113,113,0.9)',
           'watch',
           'rgba(251,191,36,0.75)',
+          'insufficient_evidence',
+          'rgba(56,189,248,0.55)',
           'rgba(148,163,184,0.28)',
         ],
         'line-width': [
@@ -131,6 +133,8 @@ export function overlayLayers(): LayerSpecification[] {
           1.8,
           'watch',
           1.1,
+          'insufficient_evidence',
+          0.8,
           0.5,
         ],
       },

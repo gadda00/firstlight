@@ -436,6 +436,24 @@ export function generateEvent(meta: EventMeta): EventRawData {
       rd.blocked = false; // elevated viaducts often survive
       rd.blockCause = null;
     }
+    // Phase 3: every blocked road carries a time-stamped closure
+    // observation with source + confidence (demo values, clearly seeded).
+    if (rd.blocked) {
+      const kind =
+        rd.blockCause === 'flood'
+          ? rng.bool(0.8)
+            ? 'hard'
+            : 'probable'
+          : rng.bool(0.6)
+            ? 'hard'
+            : 'unverified';
+      rd.closure = {
+        observedAt: meta.eventDate,
+        source: rd.blockCause === 'flood' ? 'synthetic: SAR flood intersection' : 'synthetic: debris proxy buffer',
+        confidence: Number(rng.range(0.7, 0.95).toFixed(2)),
+        kind,
+      };
+    }
   }
 
   /* ------------------------------------------------------------ facilities */

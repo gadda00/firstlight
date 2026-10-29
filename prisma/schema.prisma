@@ -1,0 +1,377 @@
+// FirstLight — operational persistence schema (Phase 1).
+//
+// PILOT STORE: SQLite via Prisma. The schema is deliberately relational and
+// metadata-first so the production path — PostgreSQL + PostGIS for
+// authoritative vector data, S3-compatible object storage for rasters, Redis
+// for locks/queues — is a migration, not a redesign (see ARCHITECTURE.md §4
+// "Persistence" and ADR-001).
+//
+// Conventions:
+//  - String-typed enumerations (SQLite has no native enums) — every value is
+//    validated at the API boundary by Zod schemas in src/lib/server/schemas.ts.
+//  - Every row that belongs to a tenant carries orgId (organization isolation).
+//  - Append-only tables (AuditEvent, ReviewDecision, IngestionAttempt,
+//    SitrepApproval) are never updated or deleted in application code.
+
+generator client {
+  provider        = "prisma-client-js"
+  // native (dev/CI) + debian-openssl-3.0.x (Vercel/serverless images)
+  binaryTargets   = ["native", "debian-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+/* ------------------------------------------------------------------ tenancy */
+
+model Organization {
+  id          String   @id @default(cuid())
+  slug        String   @unique
+  name        String
+  createdAt   DateTime @default(now())
+
+  users       User[]
+  events      IncidentEvent[]
+  audits      AuditEvent[]
+  scoreConfigs ScoreConfig[]
+}
+
+model User {
+  id        String    @id @default(cuid())
+  orgId     String
+  org       Organization @relation(fields: [orgId], references: [id])
+  email     String    @unique
+  name      String
+  /// admin | approver | reviewer | analyst | observer (Zod-validated)
+  role      String
+  /// SHA-256 of the account's login token (demo auth model — tokens are
+  /// issued out-of-band by the seed script; production uses OIDC/SAML).
+  tokenHash String?
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  sessions   Session[]
+  decisions  ReviewDecision[]
+  approvals  SitrepApproval[]
+}
+
+model Session {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id])
+  /// SHA-256 of the 192-bit bearer token issued at login.
+  tokenHash String    @unique
+  createdAt DateTime  @default(now())
+  expiresAt DateTime
+  revokedAt DateTime?
+  lastSeenAt DateTime?
+
+  @@index([userId])
+}
+
+/* -------------------------------------------------------------------- events */
+
+model IncidentEvent {
+  id           String   @id @default(cuid())
+  orgId        String
+  org          Organization @relation(fields: [orgId], references: [id])
+  name         String
+  /// hurricane | flood | earthquake
+  archetype    String
+  /// draft | ingesting | processing | review | approved | published | archived
+  status       String
+  country      String
+  location     String
+  centerLat    Float
+  centerLng    Float
+  aoiKm        Float
+  incidentTime DateTime
+  severity     Float    @default(0.7)
+  seed         Int
+  /// Synthetic demo layer attached (labeled `simulated` in every export).
+  demoLayer    Boolean  @default(true)
+  /// Optimistic-concurrency version — mutations must match expected version.
+  version      Int      @default(1)
+  createdBy    String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  assets       AssetRecord[]
+  runs         IngestionRun[]
+  reviewTasks  ReviewTask[]
+  sitreps      SitrepDraft[]
+  exports      ExportArtifact[]
+  bundles      OfflineBundle[]
+  scoreConfigs ScoreConfig[]
+
+  @@index([orgId, status])
+}
+
+/* ------------------------------------------------------------- data catalog */
+
+model AssetRecord {
+  id            String   @id @default(cuid())
+  eventId       String
+  event         IncidentEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  /// Adapter id (registry key): usgs-earthquake, open-meteo-flood, ...
+  adapterId     String
+  provider      String
+  /// hazard.earthquake | hazard.flood-forecast | hazard.fire-hotspot |
+  /// alert.cap | imagery.stac-item | exposure.population | roads.osm |
+  /// synthetic.demo
+  assetType     String
+  /// Provider-native identifier (unique within the event + adapter).
+  externalId    String
+  title         String
+  /// Observation / acquisition time from the provider.
+  acquiredAt    DateTime?
+  /// Provider publication / update time.
+  publishedAt   DateTime?
+  license       String
+  attribution   String?
+  url           String?
+  checksumSha256 String?
+  sizeBytes     Int?
+  /// Quality metrics: {magnitude, depthKm, cloudPct, resolutionM, ...}
+  qualityJson   String
+  /// GeoJSON footprint (point or polygon) when the provider supplies one.
+  geometryJson  String?
+  /// discovered | acquired | validated | published | failed
+  status        String
+  /// True iff this record describes simulated content (DemoScenarioProvider).
+  simulated     Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([eventId, adapterId, externalId])
+  @@index([eventId, assetType])
+  @@index([eventId, status])
+}
+
+/* --------------------------------------------------- ingestion orchestration */
+
+model IngestionRun {
+  id             String   @id @default(cuid())
+  eventId        String
+  event          IncidentEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  adapterId      String
+  /// eventId:adapterId:params-digest — re-running the same request replays
+  /// the original run instead of duplicating work.
+  idempotencyKey String   @unique
+  /// queued | running | succeeded | failed | dead
+  status         String
+  attempts       Int      @default(0)
+  /// [{stage, status, detail, ms}] — structured stage log.
+  stageLogsJson  String?
+  error          String?
+  startedAt      DateTime @default(now())
+  finishedAt     DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  attemptsLog    IngestionAttempt[]
+
+  @@index([eventId, adapterId])
+}
+
+model IngestionAttempt {
+  id         String   @id @default(cuid())
+  runId      String
+  run        IngestionRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  attemptNo  Int
+  ok         Boolean
+  httpStatus Int?
+  latencyMs  Int?
+  error      String?
+  startedAt  DateTime @default(now())
+
+  @@index([runId])
+}
+
+/* --------------------------------------------------------- review workflow */
+
+model ReviewTask {
+  id             String   @id @default(cuid())
+  eventId        String
+  event          IncidentEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  targetType     String
+  targetId       String
+  /// Why the detection was flagged (model confidence, flood-edge ambiguity…)
+  reason         String
+  modelConfidence Float
+  priority       Int      @default(0)
+  /// open | in_review | decided
+  status         String
+  assignedTo     String?
+  /// Optimistic-concurrency version — decision writes must match it.
+  version        Int      @default(1)
+  createdById    String?
+  dueAt          DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  decisions      ReviewDecision[]
+
+  @@index([eventId, status])
+}
+
+model ReviewDecision {
+  id        String   @id @default(cuid())
+  taskId    String
+  task      ReviewTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  reviewerId String
+  reviewer  User      @relation(fields: [reviewerId], references: [id])
+  /// confirmed | rejected | reclassified
+  decision  String
+  newClass  String?
+  /// REQUIRED — free-text justification, never blank.
+  reason    String
+  notes     String?
+  createdAt DateTime @default(now())
+
+  @@index([taskId])
+}
+
+/* ------------------------------------------------------- scoring versions */
+
+model ScoreConfig {
+  id             String   @id @default(cuid())
+  orgId          String
+  org            Organization @relation(fields: [orgId], references: [id])
+  /// null → organization default profile.
+  eventId        String?
+  event          IncidentEvent? @relation(fields: [eventId], references: [id])
+  name           String
+  weightsJson    String
+  /// max | p90robust
+  normalization  String
+  /// Labeled exposure method id (see SCORING_METHOD.md).
+  exposureMethod String
+  missingPenalty Float    @default(0.2)
+  version        Int
+  approvedById   String?
+  createdById    String
+  createdAt      DateTime @default(now())
+
+  @@unique([orgId, name, version])
+}
+
+/* --------------------------------------------------------- sitrep + claims */
+
+model SitrepDraft {
+  id            String   @id @default(cuid())
+  eventId       String
+  event         IncidentEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  version       Int
+  /// draft | approved | superseded
+  status        String
+  markdown      String
+  claimsJson    String
+  /// SHA-256 of the canonical claim set — frozen by approval.
+  claimsHash    String
+  generatedById String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  claims        SitrepClaim[]
+  approvals     SitrepApproval[]
+
+  @@unique([eventId, version])
+}
+
+model SitrepClaim {
+  id               String   @id @default(cuid())
+  draftId          String
+  draft            SitrepDraft @relation(fields: [draftId], references: [id], onDelete: Cascade)
+  seq              Int
+  /// Typed query tool: get_event_summary | top_zones | isolated_facilities |
+  /// source_freshness | review_status | route_options | hazard_feed
+  tool             String
+  paramsJson       String
+  valueJson        String
+  /// Asset IDs backing the claim (data catalog lineage).
+  evidenceAssetIds String
+  /// SHA-256(tool:canonical(params):canonical(value)).
+  queryHash        String
+  qualityNote      String?
+
+  @@index([draftId])
+}
+
+model SitrepApproval {
+  id         String   @id @default(cuid())
+  draftId    String
+  draft      SitrepDraft @relation(fields: [draftId], references: [id], onDelete: Cascade)
+  approverId String
+  approver   User      @relation(fields: [approverId], references: [id])
+  /// Must equal the draft's claimsHash at approval time (freeze check).
+  claimsHash String
+  reason     String?
+  approvedAt DateTime @default(now())
+
+  @@index([draftId])
+}
+
+/* ------------------------------------------------------------ exports */
+
+model ExportArtifact {
+  id          String   @id @default(cuid())
+  eventId     String
+  event       IncidentEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  /// damage.geojson | flood.geojson | zones.geojson | roads.geojson |
+  /// routes.geojson | zones.csv | sitrep.md | audit.json | offline-bundle
+  kind        String
+  sizeBytes   Int
+  sha256      String
+  /// Approval gate state at export time (sitrep exports require approval).
+  approvalState String
+  createdById String
+  createdAt   DateTime @default(now())
+
+  @@index([eventId, kind])
+}
+
+model OfflineBundle {
+  id           String   @id @default(cuid())
+  eventId      String
+  event        IncidentEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  exportId     String?
+  /// firstlight-offline-bundle/2.0 manifest (schemaVersion, layer
+  /// checksums, license notices, expiry, generator identity).
+  manifestJson String
+  sha256       String
+  expiresAt    DateTime
+  revokedAt    DateTime?
+  createdById  String
+  createdAt    DateTime @default(now())
+
+  @@index([eventId])
+}
+
+/* ------------------------------------------------------------- audit chain */
+
+model AuditEvent {
+  id          String   @id @default(cuid())
+  orgId       String
+  org         Organization @relation(fields: [orgId], references: [id])
+  /// Monotonic per-organization sequence — gap-free chain ordering.
+  seq         Int
+  actorId     String?
+  /// auth.login | auth.logout | event.created | event.status_changed |
+  /// ingestion.run | asset.upserted | review.decided | sitrep.generated |
+  /// sitrep.approved | export.created | bundle.revoked | scoreconfig.published
+  action      String
+  entityType  String
+  entityId    String
+  payloadJson String
+  /// Hash of the previous AuditEvent in the chain ("" for seq 0).
+  prevHash    String
+  /// SHA-256(prevHash ‖ seq ‖ action ‖ entityType ‖ entityId ‖ payloadJson ‖ createdAt)
+  hash        String
+  createdAt   DateTime @default(now())
+
+  @@unique([orgId, seq])
+  @@index([orgId, createdAt])
+}

@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { EVENTS } from '@/lib/firstlight/events';
 import { useFirstLight } from '@/store/firstlight';
 import { fmtInt } from '@/lib/firstlight/geo';
+import { demoModeEnabled } from '@/lib/firstlight/mode';
 
 export function Header() {
   const eventId = useFirstLight((s) => s.eventId);
@@ -15,6 +16,7 @@ export function Header() {
   const decision = useFirstLight((s) => s.decision);
   const raw = useFirstLight((s) => s.raw);
   const phase = useFirstLight((s) => s.phase);
+  const isDemo = demoModeEnabled();
 
   const s = decision?.stats;
   const event = raw?.meta;
@@ -38,9 +40,13 @@ export function Header() {
               </span>
               <Badge
                 variant="outline"
-                className="h-5 px-1.5 text-[9px] font-bold tracking-wider border-amber-500/50 text-amber-400 hidden sm:inline-flex"
+                className={`h-5 px-1.5 text-[9px] font-bold tracking-wider hidden sm:inline-flex ${
+                  isDemo
+                    ? 'border-amber-500/50 text-amber-400'
+                    : 'border-emerald-500/50 text-emerald-400'
+                }`}
               >
-                v2.1 DEMO
+                {isDemo ? 'v2.2 DEMO' : 'v2.2 OPERATIONAL'}
               </Badge>
             </div>
             <span className="hidden md:block text-[9px] font-semibold tracking-[0.22em] text-zinc-500 mt-1">
@@ -118,9 +124,13 @@ export function Header() {
           </span>
           <Badge
             variant="outline"
-            className="h-6 px-2 text-[9px] font-bold tracking-wider border-amber-500/60 bg-amber-500/10 text-amber-300 whitespace-nowrap"
+            className={`h-6 px-2 text-[9px] font-bold tracking-wider whitespace-nowrap ${
+              isDemo
+                ? 'border-amber-500/60 bg-amber-500/10 text-amber-300'
+                : 'border-emerald-500/60 bg-emerald-500/10 text-emerald-300'
+            }`}
           >
-            ⚠ SIMULATED DEMO DATA
+            {isDemo ? '⚠ SIMULATED DEMO DATA' : 'AUTHENTICATED · LABELED SOURCES'}
           </Badge>
           <a
             href="https://github.com/gadda00/firstlight"

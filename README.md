@@ -1,130 +1,113 @@
 # FirstLight — Disaster Intelligence Platform
 
-**From raw imagery to a prioritized, routable response map — for the first six hours after a disaster.**
+**From raw evidence to a prioritized, routable response map — for the first six hours after a disaster.**
 
-FirstLight is a Geo-AI decision-layer demo that ingests pre/post-event imagery concepts, detects building damage and flood extents, and fuses those outputs with road networks, population grids, and critical facilities to answer the questions responders actually ask:
+FirstLight is a Geo-AI decision layer for humanitarian logistics, damage assessment, and access analysis. This repository now ships **two clearly separated run modes** — a fully client-side **demo** (unchanged behavior, clearly labeled simulated data) and an **operational mode** with a server API, database persistence, authentication/RBAC, real open-data ingestion, a SHA-256 audit chain, and approval-frozen sitreps.
 
-> *Where is the need greatest, which roads still work, and which hospitals or communities are cut off?*
-
-> ⚠️ **All damage footprints, facility statuses, and population figures in this demo are procedurally SIMULATED.** No real imagery is processed. Every artifact is labeled with its provenance (source, sensor, date, resolution, license, processing version). This is a platform demonstration, not an operational product.
+> **Ethics & scope.** FirstLight supports humanitarian logistics, damage assessment, access analysis, and operational briefing. It provides no targeting, no offensive intelligence, no surveillance of individuals, and no autonomous dispatch. Every operational recommendation is reviewable, explainable, uncertainty-aware, and subject to authorized human approval. Missing data is reported as missing — never silently rendered as "low impact".
 
 ---
 
-## Live demo
+## Live demo (simulated, static)
 
-**https://gadda00.github.io/firstlight/** (deployed from this repository)
+**https://gadda00.github.io/firstlight/** — deployed from this repository on every push to `main`.
 
-Deploy your own in one click:
+All damage footprints, facility statuses, and population figures in the demo are **procedurally simulated** (deterministic seeded generator, now isolated behind the `DemoScenarioProvider` + a `DEMO_MODE` flag). Every artifact carries its provenance (source, sensor, date, resolution, license, processing version, and — in v2 — per-zone uncertainty bounds and data-quality flags).
+
+Deploy your own demo in one click:
 
 | Platform | How |
 |---|---|
-| **Netlify** | [![Deploy to Netlify](https://www.netlify.com/img/deploy/button.svg)](https://app.netlify.com/start/deploy?repository=https://github.com/gadda00/firstlight) — or Site → *Import from Git* → pick this repo. Zero config (`netlify.toml` included). |
-| **Vercel** | [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/gadda00/firstlight) — or *Add New Project → Import* this repo. Zero config (`vercel.json` included). |
-| **GitHub Pages** | Already wired: `.github/workflows/deploy-pages.yml` builds and deploys on every push to `main`. |
+| **Netlify** | [![Deploy to Netlify](https://www.netlify.com/img/deploy/button.svg)](https://app.netlify.com/start/deploy?repository=https://github.com/gadda00/firstlight) — zero config (`netlify.toml` included) |
+| **Vercel** | [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/gadda00/firstlight) — zero config (`vercel.json` included) |
+| **GitHub Pages** | Already wired: `.github/workflows/deploy-pages.yml` |
 
-## What's implemented
+## Operational mode (server, authenticated, real data)
 
-This repository implements the **decision-layer wedge** from the FirstLight Technical Blueprint (v2.0) — the part that turns raw detections into operational answers — as a fully client-side web platform:
+The operational pilot adds (all verified by an automated 52-check browser suite):
 
-| Blueprint layer | Implementation |
+- **Persistence** — SQLite pilot store via Prisma (schema designed to migrate to PostgreSQL + PostGIS; see `ARCHITECTURE.md`): organizations, users, sessions, events, asset catalog, ingestion runs/attempts, review tasks + immutable decisions, versioned score configs, sitrep drafts/claims/approvals, export artifacts, offline bundles, and an append-only **SHA-256 audit chain**.
+- **Auth & RBAC** — 192-bit hashed bearer sessions; capability lattice (observer/analyst/reviewer/approver/admin); org isolation; login/logout audited. Pilot uses seeded account tokens; production path is OIDC/SAML (documented seam).
+- **Real open-data ingestion** — `DataSourceAdapter` contract with retries, backoff, timeouts, bounded bodies, SSRF host allowlists, and checksums. **Live now:** USGS earthquake feed, NOAA/NWS alerts, Open-Meteo GloFAS discharge, Copernicus STAC metadata, bounded OSM Overpass. **Blocked honestly:** NASA FIRMS (needs free `MAP_TOKEN`). **Fixture-only:** WorldPop (raster intersection deferred).
+- **Grounded sitreps** — every number comes from a typed query tool; claims cite catalog asset IDs and carry quality notes; approval **freezes** the claim set by SHA-256 hash (two-person rule: generator ≠ approver).
+- **Scoring v2** — versioned score manifest, area-weighted flood share (true polygon∩hexagon clipping), uncertainty bounds, ±25% sensitivity analysis, missingness penalties, and a `not enough evidence` outcome instead of forced tiers.
+- **Exports & offline bundles v2** — server-built, checksummed, provenance-stamped; bundles carry per-layer checksums, expiry, and revocation with import-side validation.
+
+### Run the operational pilot locally
+
+```bash
+bun install
+cp .env.example .env                      # set DATABASE_URL to an ABSOLUTE path
+bunx prisma db push                       # create the schema
+bun run db:seed                           # org + one user per role (tokens printed)
+DEMO_MODE=false NEXT_PUBLIC_DEMO_MODE=false bun run build
+DEMO_MODE=false DATABASE_URL=file:$(pwd)/db/firstlight.db bun run start
+# → http://localhost:3000  (login gate; use the seeded analyst account)
+```
+
+Smoke the whole operational workflow end-to-end (real browser, real USGS/NWS calls):
+
+```bash
+bun run build:static && DEMO_MODE=false NEXT_PUBLIC_DEMO_MODE=false bun run build
+python3 scripts/browser-smoke.py          # 52 checks: login→ingest→review→sitrep→approve→export→bundle→audit
+```
+
+### Repository verification gates
+
+```bash
+bun run lint        # eslint — 0 errors
+bun run typecheck   # tsc --noEmit — HARD gate (ignoreBuildErrors removed in Phase 0)
+bun test            # 130 unit + integration + contract tests
+bun run build       # operational build (type-validated)
+bun run build:static  # demo build (API route excluded — a static build never ships a server)
+```
+
+CI (`.github/workflows/ci.yml`) runs all of the above with a **frozen lockfile and no fallback**. `bun.lock` is committed.
+
+## What's implemented vs. honestly deferred
+
+| Capability | Status |
 |---|---|
-| **1. Ingestion** | Simulated STAC-style provenance records (Sentinel-1/2, Maxar Open Data, Planet, WorldPop) with per-source license, resolution, cloud %, processing version |
-| **2. Preprocessing** | Deterministic seeded event generation: 3 archetypes (hurricane surge + wind field, riverine flood meander, earthquake intensity + soft-soil amplification) |
-| **3. AI detection mesh** | Procedurally simulated building damage (4 classes + per-detection confidence), SAR flood extents with depth classes, uncertainty routing to a review queue |
-| **4. Spatial graph engine** | **Real**: OSM-style road network → graph → binary-heap **Dijkstra** routing, hospital isochrones, isolation deltas (>30 min), debris/flood blockage |
-| **5. Grounded sitrep layer** | **Real**: deterministic report engine — every number traces to a typed tool call (`get_event_summary`, `top_zones`, `isolated_facilities`…) with FNV-1a assertion hashes; mandatory human sign-off before export |
+| H3 priority zoning, dual swipe map, review queue, grounded sitrep concept, exports | **Retained from v2.1** (demo mode) |
+| Type gate, lockfile, tests, demo isolation, mode banners | **Done (Phase 0)** — `tsc` was failing at baseline; now green and enforced |
+| Persistence, auth/RBAC, API validation, audit chain, health | **Done (Phase 1)** |
+| 7 data-source adapters + idempotent ingestion orchestration | **Done (Phase 2)** — 5 live-capable, 1 blocked-by-key (FIRMS), 1 fixture (WorldPop) |
+| Scoring v2 (uncertainty, sensitivity, missingness, area-weighted flood) | **Done (Phase 3)** |
+| Server claims, approval freeze, exports, offline bundle v2 | **Done (Phase 4)** |
+| **Raster/imagery processing** (SAR RTC, cloud masking, compositing) | **Deferred** — requires the Python worker stack (rasterio/GDAL); imagery stays a catalog *reference*, never a fabricated detection |
+| **ML detection models** | **Deferred** — no model is shipped; the demo generator is explicitly labeled synthetic and `truthCorrect` never leaves demo evaluation. See `MODEL_CARD_TEMPLATE.md` |
+| **Real road graph at scale** (one-ways, turn restrictions, full OSM) | **Partial** — graph engine supports directed edges + closure observations; full-network ingest is the PostGIS phase |
+| OIDC/SAML + MFA, object storage, queue, Redis, tiles | **Deferred with documented seams** — pilot uses hashed tokens, SQLite, in-process orchestration |
 
-### Decision layer (the wedge)
-
-Priority zoning uses Uber **H3 hexagons (res 8)** with the blueprint's transparent, tunable score:
-
-```
-need(z) = w₁·D(z) + w₂·Pexp(z) + w₃·Iso(z) + w₄·Crit(z)
-
-D(z)     = (1.0·n_destroyed + 0.6·n_major + 0.2·n_minor) / n_total
-Pexp(z)  = affected_population / max_zone_population
-Iso(z)   = 1 if travel time to nearest hospital worsens by > 30 min (or unreachable)
-Crit(z)  = impacted critical facilities / max_zone_impacted
-```
-
-Adjust **w₁–w₄ live** in the UI (toolbar → *Need-score weights*) and watch zones re-rank and re-tier (WARNING / WATCH / INFORMATIONAL).
-
-### Feature highlights
-
-- **Before/after swipe map** — dual camera-synced MapLibre GL maps (Esri World Imagery / CARTO dark), draggable divider
-- **Layer stack** — damage points (4 classes), flood extents, H3 need-score zones, passable/blocked roads, facilities w/ status, dispatch routes
-- **Review queue** — low-confidence detections (TTA variance, flood-edge ambiguity, occlusion) routed to human-in-the-loop: confirm / reject-as-false-positive / reclassify → stats recompute (the "reviewed labels are the moat" loop)
-- **Route planner** — fire station → priority zone on the post-event graph, with blocked-edge avoidance counts and ground-reconnaissance advisories for low-confidence segments
-- **Exports** — `damage.geojson`, `flood.geojson`, `zones.geojson`, `zones.csv`, `roads.geojson`, `routes.geojson`, sitrep `.md` (approval-gated), audit trail JSON with hash chain, and an offline field bundle
-- **Responsive EOC UI** — dark tactical theme, KPI header, 5-stage pipeline run overlay, full mobile layout
-
-## Quick start
-
-```bash
-bun install        # or: npm install
-bun run dev        # or: npm run dev  → http://localhost:3000
-```
-
-Static production build (works on any static host):
-
-```bash
-npm run build:static   # emits ./out
-npx serve out
-```
-
-For GitHub Pages project sites, set the base path:
-
-```bash
-NEXT_PUBLIC_BASE_PATH=/firstlight npm run build:static
-```
+The full roadmap and rationale: `IMPLEMENTATION_BASELINE.md` (audited starting point) → `ARCHITECTURE.md` → `DATA_SOURCES.md` → `PILOT_ACCEPTANCE.md`.
 
 ## Tech stack
 
-- **Next.js 16** (App Router, TypeScript, static export — no server required)
-- **Tailwind CSS 4 + shadcn/ui** (dark ops-center theme)
-- **MapLibre GL JS** — dual synced maps, WebGL layers, expressions
-- **h3-js** — hexagonal priority zoning
-- **Zustand** — event/decision/review state
-- Hand-rolled geometry, **Dijkstra** with a binary min-heap, seeded PRNG (mulberry32) — zero external services, no API keys
+- **Next.js 16** (App Router, TypeScript strict) — dual build: `output: standalone` (server) / `output: export` (static demo)
+- **Prisma + SQLite** pilot store → **PostgreSQL + PostGIS** production path
+- **Zod** validation at every API boundary; uniform error envelope with request IDs
+- **MapLibre GL JS**, **h3-js**, **Zustand** (ephemeral UI state only — server is the source of truth in operational mode)
+- **Bun** (runtime, test runner, frozen lockfile), Playwright browser suite
 
-## Repository layout
+## Documentation index
 
-```
-src/
-  app/                 # layout, page (single-route app), globals.css
-  components/firstlight/
-    map-view.tsx       # dual synced swipe map + layers + tooltip
-    map-layers.ts      # MapLibre style/layer definitions
-    header.tsx         # identity, event selector, KPI pills
-    pipeline-overlay.tsx
-    app-shell.tsx      # layout composition + status bar
-    panels/            # Overview, Zones, Access, Sitrep, Review, Export, Data
-  lib/firstlight/
-    events.ts          # 3-event catalog w/ full provenance
-    generate.ts        # seeded procedural event generation
-    graph.ts           # road graph, Dijkstra, isochrones
-    decision.ts        # H3 zones, need scores, isolation, routes
-    sitrep.ts          # grounded report engine (tool-call citations)
-    exports.ts         # GeoJSON/CSV/audit/offline-bundle builders
-    geo.ts, rng.ts, types.ts
-  store/firstlight.ts  # zustand store
-.github/workflows/deploy-pages.yml   # auto-deploy to GitHub Pages
-netlify.toml | vercel.json           # one-click host configs
-```
+| Doc | Contents |
+|---|---|
+| `IMPLEMENTATION_BASELINE.md` | Pre-transformation audit (routes, honesty map, checks, migration risks) |
+| `ARCHITECTURE.md` | System boundaries, data flow, trust boundaries, persistence design |
+| `DATA_SOURCES.md` | Every adapter: endpoints, licenses, rate limits, health, fallbacks |
+| `DATA_DICTIONARY.md` | Database + export schema reference |
+| `PROVENANCE_SPEC.md` | Asset → product → claim lineage rules |
+| `SCORING_METHOD.md` | Score v2 formulas, manifest, uncertainty, sensitivity, calibration status |
+| `SECURITY.md` | Threat model, auth model, headers, retention, incident response |
+| `OPERATIONS_RUNBOOK.md` | Deploy, rollback, provider outage, stale data, restore drill |
+| `PILOT_ACCEPTANCE.md` | Measurable acceptance criteria and current status |
+| `MODEL_CARD_TEMPLATE.md` | Required disclosure format for any future detection model |
+| `docs/openapi.yaml` | API contract |
 
-## Deployment notes
+## Licensing & attribution
 
-- **Netlify**: `netlify.toml` runs `npm run build:static` and publishes `out/`.
-- **Vercel**: `vercel.json` sets the static build; zero other config.
-- **GitHub Pages**: workflow builds with `NEXT_PUBLIC_BASE_PATH=/firstlight` and publishes. Enable via *Settings → Pages → Source: GitHub Actions* (already active for this repo).
-
-## Licensing & ethics guardrails (from the blueprint)
-
-- Prototype on public benchmarks (xBD, Sen1Floods11), then transition to commercially clean data + pilot labels — **verify every license before shipping derivative products**.
-- Sentinel-1/2 data is free & open with commercial use allowed; Maxar Open Data and Planet tasking terms require review.
-- Human-in-the-loop is mandatory: sitreps require analyst sign-off; low-confidence detections route to review; exports carry the demo disclaimer.
-- No targeting features; scope limited to humanitarian logistics and damage assessment.
-
-## License
-
-MIT — see [LICENSE](LICENSE). Map tiles: © Esri, © OpenStreetMap contributors, © CARTO. This project is not affiliated with any emergency management agency.
+- Code: MIT (see `LICENSE`).
+- Demo basemaps: © Esri, © OpenStreetMap contributors, © CARTO.
+- Operational sources: each carries its license record in the data catalog and in every export (USGS public domain; GloFAS via Open-Meteo CC BY 4.0; NWS public domain; Copernicus Sentinel free & open with attribution; OSM ODbL 1.0; WorldPop CC BY 4.0). Verify every license before shipping derivative products.
+- Not affiliated with any emergency management agency.

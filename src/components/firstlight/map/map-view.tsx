@@ -210,7 +210,11 @@ export default function MapView() {
   const buildingFC = useMemo(() => {
     if (!raw) return emptyFC;
     const showUndamaged = layers.undamaged;
-    const feats = [];
+    const feats: {
+      type: 'Feature';
+      geometry: { type: 'Point'; coordinates: number[] };
+      properties: Record<string, unknown>;
+    }[] = [];
     for (const b of raw.buildings) {
       const dec = reviewDecisions.get(b.id);
       if (dec === 'rejected') continue;
@@ -467,13 +471,14 @@ export default function MapView() {
   }, []);
 
   const tierCounts = useMemo(() => {
-    if (!decision) return { warning: 0, watch: 0, informational: 0 };
+    if (!decision)
+      return { warning: 0, watch: 0, informational: 0, insufficient_evidence: 0 };
     return decision.zones.reduce(
       (acc, z) => {
         acc[z.tier]++;
         return acc;
       },
-      { warning: 0, watch: 0, informational: 0 },
+      { warning: 0, watch: 0, informational: 0, insufficient_evidence: 0 },
     );
   }, [decision]);
 

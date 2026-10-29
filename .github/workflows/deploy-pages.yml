@@ -26,8 +26,8 @@ jobs:
         with:
           bun-version: latest
 
-      - name: Install dependencies
-        run: bun install --frozen-lockfile || bun install
+      - name: Install dependencies (frozen lockfile — no silent fallback)
+        run: bun install --frozen-lockfile
 
       - name: Build static site
         run: bun run build:static

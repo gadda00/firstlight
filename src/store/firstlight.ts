@@ -8,7 +8,7 @@
 
 import { create } from 'zustand';
 import { EVENTS, eventById } from '@/lib/firstlight/events';
-import { generateEvent } from '@/lib/firstlight/generate';
+import { DemoScenarioProvider } from '@/lib/firstlight/demo-provider';
 import {
   DEFAULT_WEIGHTS,
   computeDecision,
@@ -135,8 +135,10 @@ export const useFirstLight = create<FirstLightState>((set, get) => ({
       runId: `run-${fnv1a(`${meta.id}-${Date.now()}`).slice(0, 8)}`,
     });
 
-    // synchronous compute (fast — the pipeline overlay is demo-paced)
-    const raw = generateEvent(meta);
+    // synchronous compute (fast — the pipeline overlay is demo-paced).
+    // DemoScenarioProvider is the sole sanctioned synthetic-data source:
+    // it stamps `demo` provenance and refuses to run in operational mode.
+    const raw = DemoScenarioProvider.generate(meta);
     const decision = computeDecision(
       raw,
       get().weights,

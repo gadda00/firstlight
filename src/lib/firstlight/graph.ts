@@ -29,11 +29,16 @@ export interface DijkstraResult {
 export class RoadGraph {
   nodes = new Map<string, GraphNode>();
   private edgeCount = 0;
-
+  /** Hardened construction (Phase 3):
+   *  - zero/degenerate-length segments are skipped (invalid geometry),
+   *  - duplicate edges (same from→to + road id) are ignored,
+   *  - `oneway` roads add a single directed edge. */
   constructor(roads: RoadSegment[]) {
     // build node coordinate lookup from road geometry
     const nodeCoord = new Map<string, [number, number]>();
     for (const rd of roads) {
+      if (!rd.nodes || rd.nodes.length !== 2) continue; // invalid geometry
+      if (!(rd.lengthKm > 0) || !(rd.speedKmh > 0)) continue; // degenerate
       const [a, b] = rd.nodes;
       if (!nodeCoord.has(a)) nodeCoord.set(a, rd.coords[0]);
       if (!nodeCoord.has(b)) nodeCoord.set(b, rd.coords[1]);
@@ -41,17 +46,27 @@ export class RoadGraph {
     for (const [id, [lng, lat]] of nodeCoord) {
       this.nodes.set(id, { id, lng, lat, edges: [] });
     }
+    const seen = new Set<string>();
     for (const rd of roads) {
+      if (!rd.nodes || rd.nodes.length !== 2) continue;
+      if (!(rd.lengthKm > 0) || !(rd.speedKmh > 0)) continue;
       const [a, b] = rd.nodes;
       const minutes = (rd.lengthKm / rd.speedKmh) * 60;
-      this.addEdge(a, b, rd, minutes);
-      this.addEdge(b, a, rd, minutes);
+      const fwdKey = `${a}>${b}:${rd.id}`;
+      const revKey = `${b}>${a}:${rd.id}`;
+      if (!seen.has(fwdKey)) {
+        if (this.addEdge(a, b, rd, minutes)) seen.add(fwdKey);
+      }
+      // one-way streets are traversable only in the digitized direction
+      if (!rd.oneway && !seen.has(revKey)) {
+        if (this.addEdge(b, a, rd, minutes)) seen.add(revKey);
+      }
     }
   }
 
-  private addEdge(from: string, to: string, rd: RoadSegment, minutes: number) {
+  private addEdge(from: string, to: string, rd: RoadSegment, minutes: number): boolean {
     const node = this.nodes.get(from);
-    if (!node || !this.nodes.get(to)) return;
+    if (!node || !this.nodes.get(to)) return false;
     node.edges.push({
       to,
       lengthKm: rd.lengthKm,
@@ -60,6 +75,7 @@ export class RoadGraph {
       blocked: rd.blocked,
     });
     this.edgeCount++;
+    return true;
   }
 
   get size(): number {

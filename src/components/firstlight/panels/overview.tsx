@@ -34,7 +34,7 @@ export function OverviewPanel() {
       acc[z.tier]++;
       return acc;
     },
-    { warning: 0, watch: 0, informational: 0 },
+    { warning: 0, watch: 0, informational: 0, insufficient_evidence: 0 },
   );
   const totalMs = raw.stages.reduce((a, st) => a + st.ms, 0);
   const damageMax = Math.max(
@@ -259,18 +259,19 @@ function DistBar({
   );
 }
 
-export function TierBadge({ tier }: { tier: 'warning' | 'watch' | 'informational' }) {
+export function TierBadge({ tier }: { tier: 'warning' | 'watch' | 'informational' | 'insufficient_evidence' }) {
   const map = {
     warning: 'border-red-500/60 bg-red-500/15 text-red-300',
     watch: 'border-amber-500/60 bg-amber-500/15 text-amber-300',
     informational: 'border-zinc-600 bg-zinc-800 text-zinc-400',
+    insufficient_evidence: 'border-dashed border-sky-500/60 bg-sky-500/10 text-sky-300',
   } as const;
   return (
     <Badge
       variant="outline"
       className={`h-4 px-1.5 text-[8px] font-bold tracking-wider ${map[tier]}`}
     >
-      {tier.toUpperCase()}
+      {tier === 'insufficient_evidence' ? 'NOT ENOUGH EVIDENCE' : tier.toUpperCase()}
     </Badge>
   );
 }
