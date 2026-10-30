@@ -1,0 +1,169 @@
+groups:
+- name: firstlight-alerts
+  rules:
+
+  # Application Health
+  - alert: FirstLightAppDown
+    expr: up{job="firstlight-app"} == 0
+    for: 1m
+    labels:
+      severity: critical
+      category: availability
+    annotations:
+      summary: "FirstLight application is down"
+      description: "FirstLight application at {{ $labels.instance }} has been down for more than 1 minute"
+
+  - alert: FirstLightHighLatency
+    expr: histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{job="firstlight-app"}[5m])) by (le)) > 1
+    for: 5m
+    labels:
+      severity: warning
+      category: performance
+    annotations:
+      summary: "FirstLight application high latency"
+      description: "p95 latency is {{ $value }}s (threshold: 1s)"
+
+  - alert: FirstLightHighErrorRate
+    expr: rate(http_requests_total{job="firstlight-app", status=~"5.."}[5m]) / rate(http_requests_total{job="firstlight-app"}[5m]) > 0.1
+    for: 5m
+    labels:
+      severity: warning
+      category: errors
+    annotations:
+      summary: "FirstLight application high error rate"
+      description: "Error rate is {{ $value }} (threshold: 10%)"
+
+  # Database
+  - alert: PostgresDown
+    expr: pg_up{job="postgres"} == 0
+    for: 1m
+    labels:
+      severity: critical
+      category: availability
+    annotations:
+      summary: "PostgreSQL is down"
+      description: "PostgreSQL at {{ $labels.instance }} has been down for more than 1 minute"
+
+  - alert: PostgresHighConnections
+    expr: pg_stat_activity_count{job="postgres", datname="firstlight"} > 100
+    for: 5m
+    labels:
+      severity: warning
+      category: performance
+    annotations:
+      summary: "PostgreSQL high connection count"
+      description: "Connection count is {{ $value }} (threshold: 100)"
+
+  - alert: PostgresSlowQueries
+    expr: rate(pg_stat_statements_total_time_sum{job="postgres", datname="firstlight"}[5m]) / rate(pg_stat_statements_calls{job="postgres", datname="firstlight"}[5m]) > 1000
+    for: 5m
+    labels:
+      severity: warning
+      category: performance
+    annotations:
+      summary: "PostgreSQL slow queries detected"
+      description: "Average query time is {{ $value }}ms (threshold: 1000ms)"
+
+  # Redis
+  - alert: RedisDown
+    expr: redis_up{job="redis"} == 0
+    for: 1m
+    labels:
+      severity: critical
+      category: availability
+    annotations:
+      summary: "Redis is down"
+      description: "Redis at {{ $labels.instance }} has been down for more than 1 minute"
+
+  - alert: RedisHighMemoryUsage
+    expr: redis_memory_used_bytes{job="redis"} / redis_memory_max_bytes{job="redis"} > 0.9
+    for: 5m
+    labels:
+      severity: warning
+      category: capacity
+    annotations:
+      summary: "Redis high memory usage"
+      description: "Memory usage is {{ $value }} (threshold: 90%)"
+
+  - alert: RedisHighConnections
+    expr: redis_connected_clients{job="redis"} > 100
+    for: 5m
+    labels:
+      severity: warning
+      category: performance
+    annotations:
+      summary: "Redis high connection count"
+      description: "Connection count is {{ $value }} (threshold: 100)"
+
+  # Ingestion Pipeline
+  - alert: IngestionFailed
+    expr: increase(ingestion_attempts_total{job="firstlight-app", status="failed"}[5m]) > 5
+    for: 5m
+    labels:
+      severity: warning
+      category: pipeline
+    annotations:
+      summary: "High ingestion failure rate"
+      description: "{{ $value }} ingestion attempts failed in the last 5 minutes"
+
+  - alert: IngestionStalled
+    expr: increase(ingestion_attempts_total{job="firstlight-app"}[10m]) == 0
+    for: 15m
+    labels:
+      severity: warning
+      category: pipeline
+    annotations:
+      summary: "Ingestion pipeline stalled"
+      description: "No ingestion attempts in the last 15 minutes"
+
+  # System Resources
+  - alert: HighCPUUsage
+    expr: (100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[1m])) * 100)) > 80
+    for: 5m
+    labels:
+      severity: warning
+      category: resources
+    annotations:
+      summary: "High CPU usage"
+      description: "CPU usage is {{ $value }}% (threshold: 80%)"
+
+  - alert: HighMemoryUsage
+    expr: (node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) / node_memory_MemTotal_bytes * 100 > 85
+    for: 5m
+    labels:
+      severity: warning
+      category: resources
+    annotations:
+      summary: "High memory usage"
+      description: "Memory usage is {{ $value }}% (threshold: 85%)"
+
+  - alert: LowDiskSpace
+    expr: node_filesystem_free_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"} * 100 < 10
+    for: 5m
+    labels:
+      severity: critical
+      category: resources
+    annotations:
+      summary: "Low disk space"
+      description: "Disk usage is {{ $value }}% (threshold: 10% free)"
+
+  # Business Metrics
+  - alert: HighEventProcessingTime
+    expr: avg(rate(event_processing_time_seconds_sum{job="firstlight-app"}[5m]) / rate(event_processing_time_seconds_count{job="firstlight-app"}[5m])) > 300
+    for: 5m
+    labels:
+      severity: warning
+      category: business
+    annotations:
+      summary: "High event processing time"
+      description: "Average event processing time is {{ $value }}s (threshold: 300s)"
+
+  - alert: HighReviewBacklog
+    expr: review_tasks_total{job="firstlight-app", status="open"} > 50
+    for: 1h
+    labels:
+      severity: warning
+      category: business
+    annotations:
+      summary: "High review backlog"
+      description: "Open review tasks: {{ $value }} (threshold: 50)"

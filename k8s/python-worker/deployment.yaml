@@ -1,0 +1,96 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: firstlight-python-worker
+  namespace: firstlight
+  labels:
+    app: firstlight
+    component: python-worker
+    tier: backend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: firstlight
+      component: python-worker
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: firstlight
+        component: python-worker
+        tier: backend
+    spec:
+      serviceAccountName: firstlight-python-worker
+      containers:
+      - name: python-worker
+        image: ghcr.io/gadda00/firstlight/python-worker:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 5555
+          name: health
+        env:
+        - name: PYTHONUNBUFFERED
+          value: "1"
+        - name: REDIS_URL
+          value: "redis://firstlight-redis.firstlight.svc.cluster.local:6379/0"
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: firstlight-secrets
+              key: database-url
+        - name: MINIO_ENDPOINT
+          value: "firstlight-minio.firstlight.svc.cluster.local"
+        - name: MINIO_PORT
+          value: "9000"
+        - name: MINIO_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: firstlight-secrets
+              key: minio-access-key
+        - name: MINIO_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: firstlight-secrets
+              key: minio-secret-key
+        resources:
+          requests:
+            cpu: 1000m
+            memory: 2Gi
+          limits:
+            cpu: 2000m
+            memory: 4Gi
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 5555
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 5555
+          initialDelaySeconds: 30
+          periodSeconds: 15
+          timeoutSeconds: 5
+          failureThreshold: 3
+      nodeSelector:
+        kubernetes.io/arch: amd64
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - firstlight
+              topologyKey: kubernetes.io/hostname

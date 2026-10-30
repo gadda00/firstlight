@@ -1,0 +1,226 @@
+version: '3.8'
+
+services:
+  # ===========================================================================
+  # FirstLight Application
+  # ===========================================================================
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: firstlight-app
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - DATABASE_URL=file:/app/db/firstlight.db
+      - DEMO_MODE=false
+      - NEXT_PUBLIC_DEMO_MODE=false
+      # Provider tokens (set via .env file or environment)
+      - FIRSTLIGHT_FIRMS_TOKEN=${FIRSTLIGHT_FIRMS_TOKEN:-}
+      - FIRSTLIGHT_COPERNICUS_USERNAME=${FIRSTLIGHT_COPERNICUS_USERNAME:-}
+      - FIRSTLIGHT_COPERNICUS_PASSWORD=${FIRSTLIGHT_COPERNICUS_PASSWORD:-}
+    volumes:
+      - ./db:/app/db
+      - ./logs:/app/logs
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    networks:
+      - firstlight-network
+
+  # ===========================================================================
+  # PostgreSQL Database (Production)
+  # ===========================================================================
+  postgres:
+    image: postgis/postgis:16-3.4
+    container_name: firstlight-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=firstlight
+      - POSTGRES_USER=firstlight
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-firstlight_pass}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-postgres.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U firstlight -d firstlight"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - firstlight-network
+
+  # ===========================================================================
+  # Redis (Caching & Queue)
+  # ===========================================================================
+  redis:
+    image: redis:7-alpine
+    container_name: firstlight-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+    networks:
+      - firstlight-network
+
+  # ===========================================================================
+  # MinIO (Object Storage - S3 Compatible)
+  # ===========================================================================
+  minio:
+    image: minio/minio:latest
+    container_name: firstlight-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER:-minioadmin}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-minioadmin}
+    volumes:
+      - minio_data:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - firstlight-network
+
+  # ===========================================================================
+  # Prometheus (Monitoring)
+  # ===========================================================================
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: firstlight-prometheus
+    restart: unless-stopped
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    networks:
+      - firstlight-network
+
+  # ===========================================================================
+  # Grafana (Visualization)
+  # ===========================================================================
+  grafana:
+    image: grafana/grafana:latest
+    container_name: firstlight-grafana
+    restart: unless-stopped
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+    depends_on:
+      prometheus:
+        condition: service_started
+    networks:
+      - firstlight-network
+
+  # ===========================================================================
+  # OpenTelemetry Collector
+  # ===========================================================================
+  otel-collector:
+    image: otel/opentelemetry-collector:latest
+    container_name: firstlight-otel-collector
+    restart: unless-stopped
+    volumes:
+      - ./monitoring/otel-config.yaml:/etc/otel-config.yaml
+    command: ["--config=/etc/otel-config.yaml"]
+    ports:
+      - "4317:4317"  # OTLP gRPC
+      - "4318:4318"  # OTLP HTTP
+      - "8888:8888"  # Metrics
+      - "8889:8889"  # Internal
+    depends_on:
+      prometheus:
+        condition: service_started
+    networks:
+      - firstlight-network
+
+  # ===========================================================================
+  # Python Worker (Raster Processing)
+  # ===========================================================================
+  python-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.python
+    container_name: firstlight-python-worker
+    restart: unless-stopped
+    environment:
+      - PYTHONUNBUFFERED=1
+      - REDIS_URL=redis://redis:6379/0
+      - DATABASE_URL=postgresql://firstlight:firstlight_pass@postgres:5432/firstlight
+    volumes:
+      - ./python:/app/python
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    networks:
+      - firstlight-network
+
+  # ===========================================================================
+  # Nginx (Reverse Proxy & Load Balancer)
+  # ===========================================================================
+  nginx:
+    image: nginx:alpine
+    container_name: firstlight-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./nginx/conf.d:/etc/nginx/conf.d
+      - ./certs:/etc/nginx/certs
+    depends_on:
+      app:
+        condition: service_healthy
+    networks:
+      - firstlight-network
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
+  prometheus_data:
+  grafana_data:
+
+networks:
+  firstlight-network:
+    driver: bridge

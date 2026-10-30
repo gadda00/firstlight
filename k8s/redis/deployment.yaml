@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: firstlight-redis
+  namespace: firstlight
+  labels:
+    app: firstlight
+    component: redis
+    tier: database
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: firstlight
+      component: redis
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: firstlight
+        component: redis
+        tier: database
+    spec:
+      containers:
+      - name: redis
+        image: redis:7-alpine
+        ports:
+        - containerPort: 6379
+          name: redis
+        command:
+        - redis-server
+        - --appendonly
+        - "yes"
+        - --maxmemory
+        - "256mb"
+        - --maxmemory-policy
+        - "allkeys-lru"
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        volumeMounts:
+        - name: redis-data
+          mountPath: /data
+      volumes:
+      - name: redis-data
+        persistentVolumeClaim:
+          claimName: firstlight-redis-data
+      nodeSelector:
+        kubernetes.io/arch: amd64

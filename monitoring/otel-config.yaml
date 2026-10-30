@@ -1,0 +1,91 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: 'otel-collector'
+          scrape_interval: 10s
+          static_configs:
+            - targets: ['0.0.0.0:8888']
+
+processors:
+  batch:
+    timeout: 10s
+    send_batch_size: 1024
+
+  # Add resource attributes
+  resource:
+    attributes:
+      - key: service.name
+        value: "firstlight"
+        action: upsert
+      - key: deployment.environment
+        value: "production"
+        action: upsert
+
+  # Filter out sensitive data
+  filter:
+    spans:
+      include:
+        - 'name != "*"'
+    logs:
+      include:
+        - 'severity != "debug"'
+
+  # Add span attributes
+  attributes:
+    actions:
+      - key: span.kind
+        action: insert
+        value: "server"
+
+  # Add trace IDs to logs
+  resource_attributes:
+    actions:
+      - key: trace_id
+        action: insert
+        value: "${trace_id}"
+
+exporters:
+  logging:
+    loglevel: debug
+
+  prometheus:
+    endpoint: "0.0.0.0:8889"
+    namespace: firstlight
+    const_labels:
+      service: firstlight
+
+  otlp:
+    endpoint: "otel-collector:4317"
+    tls:
+      insecure: true
+
+  # For external monitoring (e.g., Datadog, New Relic)
+  # otlp/datadog:
+  #   endpoint: "datadog-agent:4317"
+  #   tls:
+  #     insecure: true
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch, resource, attributes]
+      exporters: [logging, otlp]
+
+    metrics:
+      receivers: [otlp, prometheus]
+      processors: [batch, resource, filter]
+      exporters: [logging, prometheus, otlp]
+
+    logs:
+      receivers: [otlp]
+      processors: [batch, resource, filter, resource_attributes]
+      exporters: [logging, otlp]
