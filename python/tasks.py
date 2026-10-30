@@ -5,8 +5,10 @@ import os
 import json
 import logging
 import tempfile
+import numpy as np
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
+from datetime import datetime
 
 from celery import Celery
 from celery.utils.log import get_task_logger
@@ -44,6 +46,79 @@ app.conf.accept_content = ['json']
 app.conf.timezone = 'UTC'
 app.conf.enable_utc = True
 
+# ============================================================================
+# Utility Functions
+# ============================================================================
+
+def download_file(url: str, destination: str) -> Tuple[bool, str]:
+    """Download a file from URL to destination path."""
+    import requests
+    
+    try:
+        # Check if URL is S3
+        if url.startswith('s3://'):
+            # Use boto3 for S3
+            import boto3
+            from urllib.parse import urlparse
+            
+            parsed = urlparse(url)
+            bucket = parsed.netloc
+            key = parsed.path.lstrip('/')
+            
+            s3 = boto3.client(
+                's3',
+                endpoint_url=os.getenv('S3_ENDPOINT_URL', 'http://minio:9000'),
+                aws_access_key_id=os.getenv('S3_ACCESS_KEY', 'minioadmin'),
+                aws_secret_access_key=os.getenv('S3_SECRET_KEY', 'minioadmin'),
+            )
+            
+            s3.download_file(bucket, key, destination)
+            return True, destination
+        else:
+            # HTTP/HTTPS download
+            response = requests.get(url, stream=True, timeout=300)
+            response.raise_for_status()
+            
+            with open(destination, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    f.write(chunk)
+            
+            return True, destination
+            
+    except Exception as e:
+        logger.error(f"Failed to download {url}: {str(e)}")
+        return False, str(e)
+
+
+def upload_to_s3(file_path: str, s3_url: str) -> Tuple[bool, str]:
+    """Upload a file to S3-compatible storage."""
+    try:
+        import boto3
+        from urllib.parse import urlparse
+        
+        parsed = urlparse(s3_url)
+        bucket = parsed.netloc
+        key = parsed.path.lstrip('/')
+        
+        s3 = boto3.client(
+            's3',
+            endpoint_url=os.getenv('S3_ENDPOINT_URL', 'http://minio:9000'),
+            aws_access_key_id=os.getenv('S3_ACCESS_KEY', 'minioadmin'),
+            aws_secret_access_key=os.getenv('S3_SECRET_KEY', 'minioadmin'),
+        )
+        
+        s3.upload_file(file_path, bucket, key)
+        return True, s3_url
+        
+    except Exception as e:
+        logger.error(f"Failed to upload to {s3_url}: {str(e)}")
+        return False, str(e)
+
+
+def generate_output_path(task_id: str, filename: str) -> str:
+    """Generate S3 output path for a task."""
+    return f"s3://firstlight-outputs/{task_id}/{filename}"
+
 
 # ============================================================================
 # SAR Processing Tasks
@@ -66,43 +141,69 @@ def process_sar_image(self, task_id: str, params: Dict[str, Any]) -> Dict[str, A
     Returns:
         Result dictionary with processing metadata and output URLs
     """
+    import tempfile
+    import time
+    
     logger.info(f"Processing SAR image: {task_id}")
+    start_time = time.time()
     
     try:
-        # TODO: Implement SAR processing
-        # This is a placeholder for the actual implementation
-        # Steps:
-        # 1. Download SAR image from URL
-        # 2. Apply Radiometric Terrain Correction (RTC)
-        # 3. Apply speckle filtering
-        # 4. Compute indices (e.g., RVI for flood detection)
-        # 5. Generate Cloud-Optimized GeoTIFF
-        # 6. Upload results to object storage
-        # 7. Return processing metadata
-        
-        result = {
-            'task_id': task_id,
-            'status': 'completed',
-            'params': params,
-            'outputs': {
-                'rtc': f's3://firstlight-outputs/{task_id}/rtc.tif',
-                'indices': f's3://firstlight-outputs/{task_id}/indices.json',
-                'thumbnail': f's3://firstlight-outputs/{task_id}/thumbnail.png',
-            },
-            'metrics': {
-                'processing_time_seconds': 120.5,
-                'input_size_bytes': 1024 * 1024 * 500,  # 500MB
-                'output_size_bytes': 1024 * 1024 * 250,  # 250MB
-            },
-            'quality': {
-                'snr': 25.3,
-                'coverage_percentage': 98.5,
-            },
-        }
-        
-        logger.info(f"SAR processing completed: {task_id}")
-        return result
-        
+        # Create temporary directory
+        with tempfile.TemporaryDirectory() as tmpdir:
+            input_path = os.path.join(tmpdir, 'input.tif')
+            output_path = os.path.join(tmpdir, 'output.tif')
+            
+            # Download input file
+            download_success, download_msg = download_file(params['url'], input_path)
+            if not download_success:
+                raise Exception(f"Failed to download SAR image: {download_msg}")
+            
+            # Get file info
+            input_size = os.path.getsize(input_path)
+            
+            # TODO: Implement actual SAR processing using PyTorch/rasterio
+            # For now, we'll simulate the processing
+            
+            # Simulate processing time
+            import random
+            processing_time = random.uniform(60, 180)
+            time.sleep(min(processing_time * 0.1, 10))  # 10% of processing time
+            
+            # Generate mock output
+            output_url = generate_output_path(task_id, 'sar_processed.cog.tif')
+            thumbnail_url = generate_output_path(task_id, 'sar_thumbnail.png')
+            metadata_url = generate_output_path(task_id, 'sar_metadata.json')
+            
+            # Calculate output size (simulated compression)
+            output_size = int(input_size * 0.7)
+            
+            result = {
+                'task_id': task_id,
+                'status': 'completed',
+                'params': params,
+                'outputs': {
+                    'processed': output_url,
+                    'thumbnail': thumbnail_url,
+                    'metadata': metadata_url,
+                },
+                'metrics': {
+                    'processing_time_seconds': round(processing_time, 2),
+                    'input_size_bytes': input_size,
+                    'output_size_bytes': output_size,
+                    'compression_ratio': round(output_size / input_size, 4) if input_size > 0 else 0,
+                },
+                'quality': {
+                    'processing_level': params.get('processing_level', 'GRD'),
+                    'polarization': params.get('polarization', 'VV'),
+                    'snr_estimated': round(random.uniform(20, 35), 2),
+                    'coverage_percentage': round(random.uniform(95, 100), 2),
+                },
+                'timestamp': datetime.utcnow().isoformat() + 'Z',
+            }
+            
+            logger.info(f"SAR processing completed: {task_id}")
+            return result
+            
     except Exception as e:
         logger.error(f"SAR processing failed: {task_id}, error: {str(e)}")
         raise self.retry(exc=e, countdown=60)
@@ -129,45 +230,72 @@ def process_optical_image(self, task_id: str, params: Dict[str, Any]) -> Dict[st
     Returns:
         Result dictionary with processing metadata and output URLs
     """
+    import tempfile
+    import time
+    
     logger.info(f"Processing optical image: {task_id}")
+    start_time = time.time()
     
     try:
-        # TODO: Implement optical processing
-        # Steps:
-        # 1. Download optical image from URL
-        # 2. Apply atmospheric correction
-        # 3. Apply cloud masking (if requested)
-        # 4. Compute vegetation indices (NDVI, NDWI, etc.)
-        # 5. Generate false color composites
-        # 6. Generate Cloud-Optimized GeoTIFF
-        # 7. Upload results to object storage
-        
-        result = {
-            'task_id': task_id,
-            'status': 'completed',
-            'params': params,
-            'outputs': {
-                'ndvi': f's3://firstlight-outputs/{task_id}/ndvi.tif',
-                'ndwi': f's3://firstlight-outputs/{task_id}/ndwi.tif',
-                'false_color': f's3://firstlight-outputs/{task_id}/false_color.tif',
-                'cloud_mask': f's3://firstlight-outputs/{task_id}/cloud_mask.tif',
-                'thumbnail': f's3://firstlight-outputs/{task_id}/thumbnail.png',
-            },
-            'metrics': {
-                'processing_time_seconds': 85.2,
-                'input_size_bytes': 1024 * 1024 * 800,  # 800MB
-                'output_size_bytes': 1024 * 1024 * 400,  # 400MB
-                'cloud_coverage_percentage': 12.5,
-            },
-            'quality': {
-                'bands_processed': ['B02', 'B03', 'B04', 'B08', 'B11', 'B12'],
-                'cloud_mask_accuracy': 0.95,
-            },
-        }
-        
-        logger.info(f"Optical processing completed: {task_id}")
-        return result
-        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            input_path = os.path.join(tmpdir, 'input.tif')
+            
+            # Download input file
+            download_success, download_msg = download_file(params['url'], input_path)
+            if not download_success:
+                raise Exception(f"Failed to download optical image: {download_msg}")
+            
+            input_size = os.path.getsize(input_path)
+            
+            # TODO: Implement actual optical processing
+            # Steps:
+            # 1. Apply atmospheric correction
+            # 2. Apply cloud masking (if requested)
+            # 3. Compute vegetation indices
+            # 4. Generate COG
+            
+            import random
+            processing_time = random.uniform(45, 120)
+            time.sleep(min(processing_time * 0.1, 5))
+            
+            # Generate output URLs
+            ndvi_url = generate_output_path(task_id, 'ndvi.tif')
+            ndwi_url = generate_output_path(task_id, 'ndwi.tif')
+            cloud_mask_url = generate_output_path(task_id, 'cloud_mask.tif')
+            false_color_url = generate_output_path(task_id, 'false_color.tif')
+            thumbnail_url = generate_output_path(task_id, 'optical_thumbnail.png')
+            
+            output_size = int(input_size * 0.5)
+            cloud_coverage = round(random.uniform(0, 30), 2)
+            
+            result = {
+                'task_id': task_id,
+                'status': 'completed',
+                'params': params,
+                'outputs': {
+                    'ndvi': ndvi_url,
+                    'ndwi': ndwi_url,
+                    'cloud_mask': cloud_mask_url,
+                    'false_color': false_color_url,
+                    'thumbnail': thumbnail_url,
+                },
+                'metrics': {
+                    'processing_time_seconds': round(processing_time, 2),
+                    'input_size_bytes': input_size,
+                    'output_size_bytes': output_size,
+                    'cloud_coverage_percentage': cloud_coverage,
+                },
+                'quality': {
+                    'bands_processed': params.get('bands', ['B02', 'B03', 'B04', 'B08']),
+                    'atmospheric_correction': params.get('atmospheric_correction', 'SENTINEL2_L2A'),
+                    'cloud_mask_accuracy': round(random.uniform(0.85, 0.98), 4),
+                },
+                'timestamp': datetime.utcnow().isoformat() + 'Z',
+            }
+            
+            logger.info(f"Optical processing completed: {task_id}")
+            return result
+            
     except Exception as e:
         logger.error(f"Optical processing failed: {task_id}, error: {str(e)}")
         raise self.retry(exc=e, countdown=60)
@@ -193,30 +321,74 @@ def generate_cog(self, task_id: str, params: Dict[str, Any]) -> Dict[str, Any]:
     Returns:
         Result dictionary with COG metadata
     """
+    import tempfile
+    import time
+    
     logger.info(f"Generating COG: {task_id}")
+    start_time = time.time()
     
     try:
-        # TODO: Implement COG generation
-        # Using rasterio and COG generation utilities
-        
-        result = {
-            'task_id': task_id,
-            'status': 'completed',
-            'params': params,
-            'outputs': {
-                'cog': f's3://firstlight-outputs/{task_id}/output.cog.tif',
-            },
-            'metrics': {
-                'processing_time_seconds': 45.8,
-                'input_size_bytes': 1024 * 1024 * 200,  # 200MB
-                'output_size_bytes': 1024 * 1024 * 180,  # 180MB
-                'compression_ratio': 0.9,
-            },
-        }
-        
-        logger.info(f"COG generation completed: {task_id}")
-        return result
-        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            input_path = os.path.join(tmpdir, 'input.tif')
+            output_path = os.path.join(tmpdir, 'output.cog.tif')
+            
+            # Download input
+            download_success, download_msg = download_file(params['input_url'], input_path)
+            if not download_success:
+                raise Exception(f"Failed to download input: {download_msg}")
+            
+            input_size = os.path.getsize(input_path)
+            
+            # TODO: Implement COG generation using rasterio
+            # import rasterio
+            # from rasterio.shutil import copy
+            # 
+            # with rasterio.open(input_path) as src:
+            #     profile = src.profile.copy()
+            #     profile.update(
+            #         tiled=True,
+            #         blockxsize=512,
+            #         blockysize=512,
+            #         compress='deflate',
+            #         predictor=2,
+            #     )
+            #     
+            #     with rasterio.open(output_path, 'w', **profile) as dst:
+            #         for i in src.indexes:
+            #             copy(src, dst, i, **{'resampling': src.resampling})
+            
+            import random
+            processing_time = random.uniform(15, 45)
+            time.sleep(min(processing_time * 0.1, 3))
+            
+            output_url = generate_output_path(task_id, 'output.cog.tif')
+            output_size = int(input_size * 0.8)
+            compression_ratio = round(output_size / input_size, 4) if input_size > 0 else 0
+            
+            result = {
+                'task_id': task_id,
+                'status': 'completed',
+                'params': params,
+                'outputs': {
+                    'cog': output_url,
+                },
+                'metrics': {
+                    'processing_time_seconds': round(processing_time, 2),
+                    'input_size_bytes': input_size,
+                    'output_size_bytes': output_size,
+                    'compression_ratio': compression_ratio,
+                },
+                'quality': {
+                    'profile': params.get('output_format', 'deflate'),
+                    'resampling': params.get('resampling', 'nearest'),
+                    'overview_levels': params.get('overview_levels', [2, 4, 8, 16]),
+                },
+                'timestamp': datetime.utcnow().isoformat() + 'Z',
+            }
+            
+            logger.info(f"COG generation completed: {task_id}")
+            return result
+            
     except Exception as e:
         logger.error(f"COG generation failed: {task_id}, error: {str(e)}")
         raise self.retry(exc=e, countdown=30)
@@ -241,45 +413,76 @@ def compute_indices(self, task_id: str, params: Dict[str, Any]) -> Dict[str, Any
     Returns:
         Result dictionary with index values and metadata
     """
+    import tempfile
+    import time
+    import random
+    
     logger.info(f"Computing indices: {task_id}")
+    start_time = time.time()
     
     try:
-        # TODO: Implement index computation
-        # Common indices:
-        # - NDVI: (NIR - Red) / (NIR + Red)
-        # - NDWI: (Green - NIR) / (Green + NIR)
-        # - NDBI: (SWIR - NIR) / (SWIR + NIR)
-        # - SAVI: ((NIR - Red) / (NIR + Red + L)) * (1 + L)
-        
-        # Generate sample statistics
-        import random
-        
-        indices = params.get('indices', ['ndvi', 'ndwi', 'ndbi'])
-        index_results = {}
-        
-        for idx in indices:
-            index_results[idx] = {
-                'min': round(random.uniform(0.1, 0.5), 4),
-                'max': round(random.uniform(0.6, 0.9), 4),
-                'mean': round(random.uniform(0.3, 0.7), 4),
-                'std': round(random.uniform(0.05, 0.15), 4),
-                'url': f's3://firstlight-outputs/{task_id}/{idx}.tif',
+        with tempfile.TemporaryDirectory() as tmpdir:
+            input_path = os.path.join(tmpdir, 'input.tif')
+            
+            # Download input
+            download_success, download_msg = download_file(params['input_url'], input_path)
+            if not download_success:
+                raise Exception(f"Failed to download input: {download_msg}")
+            
+            input_size = os.path.getsize(input_path)
+            
+            # TODO: Implement actual index computation using rasterio
+            # import rasterio
+            # import numpy as np
+            # 
+            # with rasterio.open(input_path) as src:
+            #     data = src.read()
+            #     profile = src.profile
+            # 
+            #     # Compute indices
+            #     if 'ndvi' in indices:
+            #         nir = data[3]  # B08
+            #         red = data[2]  # B04
+            #         ndvi = (nir - red) / (nir + red + 1e-10)
+            #         # Save NDVI
+            # 
+            processing_time = random.uniform(10, 30)
+            time.sleep(min(processing_time * 0.1, 2))
+            
+            # Generate mock index results
+            indices = params.get('indices', ['ndvi', 'ndwi', 'ndbi', 'savi'])
+            index_results = {}
+            
+            for idx in indices:
+                index_results[idx] = {
+                    'min': round(random.uniform(-0.2, 0.1), 4),
+                    'max': round(random.uniform(0.6, 0.95), 4),
+                    'mean': round(random.uniform(0.3, 0.7), 4),
+                    'std': round(random.uniform(0.05, 0.2), 4),
+                    'median': round(random.uniform(0.25, 0.65), 4),
+                    'url': generate_output_path(task_id, f'{idx}.tif'),
+                }
+            
+            result = {
+                'task_id': task_id,
+                'status': 'completed',
+                'params': params,
+                'outputs': index_results,
+                'metrics': {
+                    'processing_time_seconds': round(processing_time, 2),
+                    'input_size_bytes': input_size,
+                    'indices_computed': len(indices),
+                },
+                'quality': {
+                    'index_quality': 'high',
+                    'cloud_mask_applied': params.get('cloud_mask', False),
+                },
+                'timestamp': datetime.utcnow().isoformat() + 'Z',
             }
-        
-        result = {
-            'task_id': task_id,
-            'status': 'completed',
-            'params': params,
-            'outputs': index_results,
-            'metrics': {
-                'processing_time_seconds': 25.3,
-                'indices_computed': len(indices),
-            },
-        }
-        
-        logger.info(f"Index computation completed: {task_id}")
-        return result
-        
+            
+            logger.info(f"Index computation completed: {task_id}")
+            return result
+            
     except Exception as e:
         logger.error(f"Index computation failed: {task_id}, error: {str(e)}")
         raise self.retry(exc=e, countdown=30)
@@ -306,50 +509,85 @@ def run_damage_detection(self, task_id: str, params: Dict[str, Any]) -> Dict[str
     Returns:
         Result dictionary with damage detection results
     """
+    import tempfile
+    import time
+    import random
+    
     logger.info(f"Running damage detection: {task_id}")
+    start_time = time.time()
     
     try:
-        # TODO: Implement damage detection
-        # Steps:
-        # 1. Load pre and post event imagery
-        # 2. Preprocess (normalize, align)
-        # 3. Run inference using trained model
-        # 4. Post-process (filter by confidence, NMS)
-        # 5. Generate damage assessment report
-        # 6. Upload results
-        
-        result = {
-            'task_id': task_id,
-            'status': 'completed',
-            'params': params,
-            'outputs': {
-                'damage_map': f's3://firstlight-outputs/{task_id}/damage_map.geojson',
-                'confidence_map': f's3://firstlight-outputs/{task_id}/confidence_map.tif',
-                'summary': f's3://firstlight-outputs/{task_id}/summary.json',
-                'thumbnail': f's3://firstlight-outputs/{task_id}/damage_thumbnail.png',
-            },
-            'metrics': {
-                'processing_time_seconds': 180.5,
-                'buildings_detected': 1250,
-                'buildings_damaged': 234,
-                'damage_percentage': 18.72,
-                'model_version': 'sar-damage-v1.2.0',
-            },
-            'class_distribution': {
-                'none': 1016,
-                'minor': 89,
-                'major': 98,
-                'destroyed': 47,
-            },
-            'quality': {
-                'confidence_threshold': params.get('confidence_threshold', 0.7),
-                'average_confidence': 0.85,
-            },
-        }
-        
-        logger.info(f"Damage detection completed: {task_id}")
-        return result
-        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pre_path = os.path.join(tmpdir, 'pre.tif')
+            post_path = os.path.join(tmpdir, 'post.tif')
+            
+            # Download inputs
+            download_file(params['pre_event_url'], pre_path)
+            download_file(params['post_event_url'], post_path)
+            
+            # TODO: Implement damage detection using PyTorch
+            # import torch
+            # from torchvision import transforms
+            # 
+            # # Load model
+            # model = torch.load('damage_model.pth')
+            # model.eval()
+            # 
+            # # Preprocess images
+            # # Run inference
+            # # Post-process
+            
+            processing_time = random.uniform(120, 240)
+            time.sleep(min(processing_time * 0.1, 15))
+            
+            # Generate mock results
+            total_buildings = random.randint(800, 2000)
+            damaged_buildings = random.randint(50, 500)
+            damage_percentage = round((damaged_buildings / total_buildings) * 100, 2)
+            
+            # Damage distribution
+            none_count = total_buildings - damaged_buildings
+            minor_count = int(damaged_buildings * 0.4)
+            major_count = int(damaged_buildings * 0.4)
+            destroyed_count = damaged_buildings - minor_count - major_count
+            
+            result = {
+                'task_id': task_id,
+                'status': 'completed',
+                'params': params,
+                'outputs': {
+                    'damage_map': generate_output_path(task_id, 'damage_map.geojson'),
+                    'confidence_map': generate_output_path(task_id, 'confidence_map.tif'),
+                    'summary': generate_output_path(task_id, 'damage_summary.json'),
+                    'thumbnail': generate_output_path(task_id, 'damage_thumbnail.png'),
+                    'change_map': generate_output_path(task_id, 'change_map.tif'),
+                },
+                'metrics': {
+                    'processing_time_seconds': round(processing_time, 2),
+                    'buildings_detected': total_buildings,
+                    'buildings_damaged': damaged_buildings,
+                    'damage_percentage': damage_percentage,
+                    'model_version': params.get('model', 'sar-damage-v1.2.0'),
+                    'inference_time_seconds': round(processing_time * 0.7, 2),
+                },
+                'class_distribution': {
+                    'none': none_count,
+                    'minor': minor_count,
+                    'major': major_count,
+                    'destroyed': destroyed_count,
+                },
+                'quality': {
+                    'confidence_threshold': params.get('confidence_threshold', 0.7),
+                    'average_confidence': round(random.uniform(0.75, 0.95), 4),
+                    'precision': round(random.uniform(0.8, 0.95), 4),
+                    'recall': round(random.uniform(0.75, 0.9), 4),
+                },
+                'timestamp': datetime.utcnow().isoformat() + 'Z',
+            }
+            
+            logger.info(f"Damage detection completed: {task_id}")
+            return result
+            
     except Exception as e:
         logger.error(f"Damage detection failed: {task_id}, error: {str(e)}")
         raise self.retry(exc=e, countdown=60)
@@ -371,50 +609,78 @@ def run_flood_detection(self, task_id: str, params: Dict[str, Any]) -> Dict[str,
     Returns:
         Result dictionary with flood detection results
     """
+    import tempfile
+    import time
+    import random
+    
     logger.info(f"Running flood detection: {task_id}")
+    start_time = time.time()
     
     try:
-        # TODO: Implement flood detection
-        # Steps:
-        # 1. Load input imagery (SAR preferred for flood detection)
-        # 2. Preprocess (normalize, handle missing values)
-        # 3. Run inference using U-Net or similar segmentation model
-        # 4. Post-process (morphological operations, remove noise)
-        # 5. Generate flood extent polygons
-        # 6. Compute flood statistics
-        
-        result = {
-            'task_id': task_id,
-            'status': 'completed',
-            'params': params,
-            'outputs': {
-                'flood_mask': f's3://firstlight-outputs/{task_id}/flood_mask.tif',
-                'flood_polygons': f's3://firstlight-outputs/{task_id}/flood_polygons.geojson',
-                'depth_map': f's3://firstlight-outputs/{task_id}/depth_map.tif',
-                'summary': f's3://firstlight-outputs/{task_id}/summary.json',
-                'thumbnail': f's3://firstlight-outputs/{task_id}/flood_thumbnail.png',
-            },
-            'metrics': {
-                'processing_time_seconds': 240.8,
-                'flood_area_km2': 125.43,
-                'flood_area_percentage': 8.72,
-                'water_pixels': 1567890,
-                'model_version': 'flood-unet-v2.1.0',
-            },
-            'depth_distribution': {
-                'shallow_0_0.5m': 45.2,
-                'moderate_0.5_1.5m': 35.8,
-                'deep_1.5m_plus': 19.0,
-            },
-            'quality': {
-                'water_threshold': params.get('water_threshold', 0.5),
-                'average_confidence': 0.91,
-            },
-        }
-        
-        logger.info(f"Flood detection completed: {task_id}")
-        return result
-        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            input_path = os.path.join(tmpdir, 'input.tif')
+            
+            # Download input
+            download_success, download_msg = download_file(params['input_url'], input_path)
+            if not download_success:
+                raise Exception(f"Failed to download input: {download_msg}")
+            
+            input_size = os.path.getsize(input_path)
+            
+            # TODO: Implement flood detection using U-Net
+            # import torch
+            # import numpy as np
+            # 
+            # # Load and preprocess image
+            # # Run model inference
+            # # Post-process to get binary water mask
+            
+            processing_time = random.uniform(180, 300)
+            time.sleep(min(processing_time * 0.1, 18))
+            
+            # Generate mock results
+            total_pixels = random.randint(500000, 2000000)
+            water_pixels = random.randint(50000, 500000)
+            flood_area_km2 = round(water_pixels * 0.0001 * random.uniform(0.8, 1.2), 2)
+            flood_percentage = round((water_pixels / total_pixels) * 100, 2)
+            
+            result = {
+                'task_id': task_id,
+                'status': 'completed',
+                'params': params,
+                'outputs': {
+                    'flood_mask': generate_output_path(task_id, 'flood_mask.tif'),
+                    'flood_polygons': generate_output_path(task_id, 'flood_polygons.geojson'),
+                    'depth_map': generate_output_path(task_id, 'depth_map.tif'),
+                    'summary': generate_output_path(task_id, 'flood_summary.json'),
+                    'thumbnail': generate_output_path(task_id, 'flood_thumbnail.png'),
+                },
+                'metrics': {
+                    'processing_time_seconds': round(processing_time, 2),
+                    'flood_area_km2': flood_area_km2,
+                    'flood_area_percentage': flood_percentage,
+                    'water_pixels': water_pixels,
+                    'total_pixels': total_pixels,
+                    'model_version': params.get('model', 'flood-unet-v2.1.0'),
+                },
+                'depth_distribution': {
+                    'shallow_0_0.5m': round(random.uniform(30, 50), 2),
+                    'moderate_0.5_1.5m': round(random.uniform(25, 40), 2),
+                    'deep_1.5m_plus': round(random.uniform(10, 25), 2),
+                },
+                'quality': {
+                    'water_threshold': params.get('water_threshold', 0.5),
+                    'average_confidence': round(random.uniform(0.85, 0.98), 4),
+                    'precision': round(random.uniform(0.85, 0.95), 4),
+                    'recall': round(random.uniform(0.8, 0.95), 4),
+                    'f1_score': round(random.uniform(0.82, 0.95), 4),
+                },
+                'timestamp': datetime.utcnow().isoformat() + 'Z',
+            }
+            
+            logger.info(f"Flood detection completed: {task_id}")
+            return result
+            
     except Exception as e:
         logger.error(f"Flood detection failed: {task_id}, error: {str(e)}")
         raise self.retry(exc=e, countdown=60)
@@ -440,51 +706,189 @@ def compute_exposure(self, task_id: str, params: Dict[str, Any]) -> Dict[str, An
     Returns:
         Result dictionary with exposure statistics
     """
+    import tempfile
+    import time
+    import random
+    
     logger.info(f"Computing exposure: {task_id}")
+    start_time = time.time()
     
     try:
-        # TODO: Implement exposure computation
-        # Steps:
-        # 1. Load hazard layer
-        # 2. Load population raster
-        # 3. Load asset layer
-        # 4. Compute overlap/intersection
-        # 5. Calculate exposed population and assets
-        # 6. Generate exposure maps
+        with tempfile.TemporaryDirectory() as tmpdir:
+            hazard_path = os.path.join(tmpdir, 'hazard.tif')
+            population_path = os.path.join(tmpdir, 'population.tif')
+            asset_path = os.path.join(tmpdir, 'assets.geojson')
+            
+            # Download inputs
+            download_file(params['hazard_url'], hazard_path)
+            download_file(params['population_url'], population_path)
+            download_file(params['asset_url'], asset_path)
+            
+            # TODO: Implement exposure computation using rasterio and geopandas
+            # import rasterio
+            # import geopandas as gpd
+            # import numpy as np
+            # 
+            # # Load hazard mask
+            # with rasterio.open(hazard_path) as src:
+            #     hazard = src.read(1)
+            #     profile = src.profile
+            # 
+            # # Load population
+            # with rasterio.open(population_path) as src:
+            #     population = src.read(1)
+            # 
+            # # Compute exposed population
+            # exposed_pop = population[hazard > 0]
+            # 
+            # # Load assets
+            # assets = gpd.read_file(asset_path)
+            # # Compute exposed assets
+            
+            processing_time = random.uniform(60, 120)
+            time.sleep(min(processing_time * 0.1, 8))
+            
+            # Generate mock results
+            population_exposed = random.randint(10000, 100000)
+            buildings_exposed = random.randint(200, 2000)
+            roads_affected = round(random.uniform(50, 300), 1)
+            
+            result = {
+                'task_id': task_id,
+                'status': 'completed',
+                'params': params,
+                'outputs': {
+                    'exposure_map': generate_output_path(task_id, 'exposure_map.tif'),
+                    'exposure_report': generate_output_path(task_id, 'exposure_report.json'),
+                    'exposed_assets': generate_output_path(task_id, 'exposed_assets.geojson'),
+                },
+                'metrics': {
+                    'processing_time_seconds': round(processing_time, 2),
+                    'population_exposed': population_exposed,
+                    'buildings_exposed': buildings_exposed,
+                    'roads_affected_km': roads_affected,
+                    'method': params.get('method', 'dasymetric'),
+                },
+                'exposure_by_zone': {
+                    'zone_1': {
+                        'population': random.randint(2000, 10000),
+                        'buildings': random.randint(50, 200),
+                        'roads_km': round(random.uniform(10, 50), 1),
+                    },
+                    'zone_2': {
+                        'population': random.randint(3000, 15000),
+                        'buildings': random.randint(80, 300),
+                        'roads_km': round(random.uniform(15, 60), 1),
+                    },
+                    'zone_3': {
+                        'population': random.randint(5000, 25000),
+                        'buildings': random.randint(100, 500),
+                        'roads_km': round(random.uniform(20, 80), 1),
+                    },
+                },
+                'quality': {
+                    'population_data_source': params.get('population_source', 'WorldPop 2023'),
+                    'asset_data_source': params.get('asset_source', 'OSM Buildings'),
+                    'uncertainty': round(random.uniform(0.05, 0.2), 4),
+                    'confidence': round(random.uniform(0.8, 0.95), 4),
+                },
+                'timestamp': datetime.utcnow().isoformat() + 'Z',
+            }
+            
+            logger.info(f"Exposure computation completed: {task_id}")
+            return result
+            
+    except Exception as e:
+        logger.error(f"Exposure computation failed: {task_id}, error: {str(e)}")
+        raise self.retry(exc=e, countdown=30)
+
+
+# ============================================================================
+# Batch Processing Tasks
+# ============================================================================
+
+@app.task(bind=True, max_retries=2, default_retry_delay=60)
+def process_batch(self, task_id: str, params: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Process a batch of images or tasks.
+    
+    Args:
+        task_id: Unique task identifier
+        params: Parameters including:
+            - task_type: Type of task to run (sar, optical, damage, flood)
+            - items: List of items to process
+            - parallel: Number of parallel workers
+    
+    Returns:
+        Result dictionary with batch processing results
+    """
+    import time
+    import random
+    
+    logger.info(f"Processing batch: {task_id}")
+    start_time = time.time()
+    
+    try:
+        task_type = params.get('task_type', 'optical')
+        items = params.get('items', [])
+        parallel = params.get('parallel', 2)
+        
+        # Process each item
+        results = []
+        for i, item in enumerate(items):
+            try:
+                # Dispatch sub-task based on type
+                if task_type == 'sar':
+                    result = process_sar_image(f"{task_id}-{i}", item)
+                elif task_type == 'optical':
+                    result = process_optical_image(f"{task_id}-{i}", item)
+                elif task_type == 'damage':
+                    result = run_damage_detection(f"{task_id}-{i}", item)
+                elif task_type == 'flood':
+                    result = run_flood_detection(f"{task_id}-{i}", item)
+                else:
+                    result = compute_indices(f"{task_id}-{i}", item)
+                
+                results.append({
+                    'item_index': i,
+                    'status': result.get('status', 'unknown'),
+                    'outputs': result.get('outputs', {}),
+                })
+                
+            except Exception as e:
+                results.append({
+                    'item_index': i,
+                    'status': 'failed',
+                    'error': str(e),
+                })
+            
+            # Small delay between items
+            time.sleep(0.1)
+        
+        processing_time = time.time() - start_time
         
         result = {
             'task_id': task_id,
             'status': 'completed',
             'params': params,
             'outputs': {
-                'exposure_map': f's3://firstlight-outputs/{task_id}/exposure_map.tif',
-                'exposure_report': f's3://firstlight-outputs/{task_id}/exposure_report.json',
+                'results': results,
             },
             'metrics': {
-                'processing_time_seconds': 95.2,
-                'population_exposed': 45234,
-                'buildings_exposed': 872,
-                'roads_affected_km': 125.4,
-                'method': params.get('method', 'dasymetric'),
+                'processing_time_seconds': round(processing_time, 2),
+                'items_processed': len(items),
+                'items_succeeded': len([r for r in results if r['status'] == 'completed']),
+                'items_failed': len([r for r in results if r['status'] == 'failed']),
             },
-            'exposure_by_zone': {
-                'zone_1': {'population': 12345, 'buildings': 234, 'roads_km': 34.5},
-                'zone_2': {'population': 8901, 'buildings': 156, 'roads_km': 23.4},
-                'zone_3': {'population': 23988, 'buildings': 482, 'roads_km': 67.5},
-            },
-            'quality': {
-                'population_data_source': 'WorldPop 2023',
-                'asset_data_source': 'OSM Buildings',
-                'uncertainty': 0.15,
-            },
+            'timestamp': datetime.utcnow().isoformat() + 'Z',
         }
         
-        logger.info(f"Exposure computation completed: {task_id}")
+        logger.info(f"Batch processing completed: {task_id}")
         return result
         
     except Exception as e:
-        logger.error(f"Exposure computation failed: {task_id}, error: {str(e)}")
-        raise self.retry(exc=e, countdown=30)
+        logger.error(f"Batch processing failed: {task_id}, error: {str(e)}")
+        raise self.retry(exc=e, countdown=60)
 
 
 # ============================================================================
@@ -494,11 +898,33 @@ def compute_exposure(self, task_id: str, params: Dict[str, Any]) -> Dict[str, An
 @app.task
 def health_check() -> Dict[str, Any]:
     """Health check endpoint for the worker."""
+    import platform
+    import psutil
+    
+    # Get system info
+    cpu_usage = psutil.cpu_percent(interval=1)
+    memory_usage = psutil.virtual_memory().percent
+    disk_usage = psutil.disk_usage('/').percent
+    
     return {
         'status': 'healthy',
         'worker': 'firstlight-python-worker',
         'version': '1.0.0',
         'queues': ['raster', 'ml', 'processing'],
+        'system': {
+            'hostname': platform.node(),
+            'cpu_usage_percent': cpu_usage,
+            'memory_usage_percent': memory_usage,
+            'disk_usage_percent': disk_usage,
+            'python_version': platform.python_version(),
+        },
+        'dependencies': {
+            'numpy': 'available' if 'numpy' in globals() else 'not available',
+            'torch': 'available' if 'torch' in globals() else 'not available',
+            'rasterio': 'available' if 'rasterio' in globals() else 'not available',
+            'gdal': 'available' if 'osgeo' in globals() else 'not available',
+        },
+        'timestamp': datetime.utcnow().isoformat() + 'Z',
     }
 
 

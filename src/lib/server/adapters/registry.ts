@@ -14,6 +14,13 @@ import { copernicusStacAdapter } from './copernicus-stac';
 import { firmsFireAdapter } from './firms-fire';
 import { osmOverpassAdapter } from './osm-overpass';
 import { worldPopAdapter } from './worldpop';
+import { planetAdapter } from './planet';
+import { maxarAdapter } from './maxar';
+import { sentinelHubAdapter } from './sentinel-hub';
+import { noaaAdapter } from './noaa';
+import { ecmwfAdapter } from './ecmwf';
+import { twitterAdapter } from './twitter';
+import { osintAdapter } from './osint';
 
 export const ADAPTERS: DataSourceAdapter[] = [
   usgsEarthquakeAdapter,
@@ -23,6 +30,13 @@ export const ADAPTERS: DataSourceAdapter[] = [
   firmsFireAdapter,
   osmOverpassAdapter,
   worldPopAdapter,
+  planetAdapter,
+  maxarAdapter,
+  sentinelHubAdapter,
+  noaaAdapter,
+  ecmwfAdapter,
+  twitterAdapter,
+  osintAdapter,
 ];
 
 const byId = new Map(ADAPTERS.map((a) => [a.id, a]));
