@@ -1,0 +1,84 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: firstlight-app-pdb
+  namespace: firstlight
+  labels:
+    app: firstlight
+    component: app
+    tier: reliability
+spec:
+  minAvailable: 2
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: firstlight
+      component: app
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: firstlight-python-worker-pdb
+  namespace: firstlight
+  labels:
+    app: firstlight
+    component: python-worker
+    tier: reliability
+spec:
+  minAvailable: 1
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: firstlight
+      component: python-worker
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: firstlight-postgres-pdb
+  namespace: firstlight
+  labels:
+    app: firstlight
+    component: postgres
+    tier: reliability
+spec:
+  minAvailable: 1
+  maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: firstlight
+      component: postgres
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: firstlight-redis-pdb
+  namespace: firstlight
+  labels:
+    app: firstlight
+    component: redis
+    tier: reliability
+spec:
+  minAvailable: 1
+  maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: firstlight
+      component: redis
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: firstlight-minio-pdb
+  namespace: firstlight
+  labels:
+    app: firstlight
+    component: minio
+    tier: reliability
+spec:
+  minAvailable: 1
+  maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: firstlight
+      component: minio

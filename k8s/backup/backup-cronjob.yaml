@@ -1,0 +1,123 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: firstlight-db-backup
+  namespace: firstlight
+  labels:
+    app: firstlight
+    tier: backup
+spec:
+  # Run daily at 2 AM
+  schedule: "0 2 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    metadata:
+      labels:
+        app: firstlight
+        tier: backup
+    spec:
+      template:
+        metadata:
+          labels:
+            app: firstlight
+            tier: backup
+        spec:
+          serviceAccountName: firstlight-backup
+          restartPolicy: OnFailure
+          containers:
+          - name: backup
+            image: appropriate/curl:latest
+            command: ["/bin/sh", "-c"]
+            args:
+            - |
+              # Set environment variables
+              export DB_HOST=firstlight-postgres
+              export DB_PORT=5432
+              export DB_NAME=firstlight
+              export DB_USER=firstlight
+              export DB_PASSWORD=$(cat /etc/backup/credentials/db-password)
+              
+              # Create backup directory
+              mkdir -p /backup
+              
+              # Perform backup
+              pg_dump -h $DB_HOST -p $DB_PORT -U $DB_USER -d $DB_NAME -F c -f /backup/firstlight-$(date +%Y%m%d-%H%M%S).dump
+              
+              # Upload to S3 (or other storage)
+              # aws s3 cp /backup/ s3://firstlight-backups/db/ --recursive
+              
+              # Clean up old backups (keep last 30 days)
+              find /backup -name "*.dump" -mtime +30 -delete
+            volumeMounts:
+            - name: backup-credentials
+              mountPath: /etc/backup/credentials
+              readOnly: true
+            - name: backup-storage
+              mountPath: /backup
+          volumes:
+          - name: backup-credentials
+            secret:
+              secretName: firstlight-secrets
+          - name: backup-storage
+            persistentVolumeClaim:
+              claimName: firstlight-backup-pvc
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: firstlight-backup-pvc
+  namespace: firstlight
+  labels:
+    app: firstlight
+    tier: backup
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 100Gi
+  storageClassName: standard
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: firstlight-backup
+  namespace: firstlight
+  labels:
+    app: firstlight
+    tier: backup
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: firstlight-backup-role
+  namespace: firstlight
+  labels:
+    app: firstlight
+    tier: backup
+rules:
+- apiGroups: [""]
+  resources: ["pods", "pods/log"]
+  verbs: ["get", "list"]
+- apiGroups: [""]
+  resources: ["persistentvolumeclaims"]
+  verbs: ["get", "list", "create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: firstlight-backup-role-binding
+  namespace: firstlight
+  labels:
+    app: firstlight
+    tier: backup
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: firstlight-backup-role
+subjects:
+- kind: ServiceAccount
+  name: firstlight-backup
+  namespace: firstlight

@@ -1,0 +1,78 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: minio-ingress
+  namespace: firstlight
+  labels:
+    app: firstlight
+    component: minio
+    tier: security
+spec:
+  podSelector:
+    matchLabels:
+      app: firstlight
+      component: minio
+  policyTypes:
+  - Ingress
+  ingress:
+  # Allow traffic from app pods (API port)
+  - from:
+    - podSelector:
+        matchLabels:
+          app: firstlight
+          component: app
+    ports:
+    - protocol: TCP
+      port: 9000
+  # Allow traffic from python worker pods (API port)
+  - from:
+    - podSelector:
+        matchLabels:
+          app: firstlight
+          component: python-worker
+    ports:
+    - protocol: TCP
+      port: 9000
+  # Allow traffic to console port from specific IPs (optional)
+  # Uncomment and modify if console access is needed
+  # - from:
+  #   - ipBlock:
+  #       cidr: 10.0.0.0/8
+  #   ports:
+  #   - protocol: TCP
+  #     port: 9001
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: minio-egress
+  namespace: firstlight
+  labels:
+    app: firstlight
+    component: minio
+    tier: security
+spec:
+  podSelector:
+    matchLabels:
+      app: firstlight
+      component: minio
+  policyTypes:
+  - Egress
+  egress:
+  # Allow DNS queries
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+  # Allow egress to object storage backends if using external storage
+  # - to:
+  #   - ipBlock:
+  #       cidr: 0.0.0.0/0
+  #   ports:
+  #   - protocol: TCP
+  #     port: 443

@@ -1,0 +1,71 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: redis-ingress
+  namespace: firstlight
+  labels:
+    app: firstlight
+    component: redis
+    tier: security
+spec:
+  podSelector:
+    matchLabels:
+      app: firstlight
+      component: redis
+  policyTypes:
+  - Ingress
+  ingress:
+  # Allow traffic from app pods
+  - from:
+    - podSelector:
+        matchLabels:
+          app: firstlight
+          component: app
+    ports:
+    - protocol: TCP
+      port: 6379
+  # Allow traffic from python worker pods
+  - from:
+    - podSelector:
+        matchLabels:
+          app: firstlight
+          component: python-worker
+    ports:
+    - protocol: TCP
+      port: 6379
+  # Allow traffic from monitoring
+  - from:
+    - podSelector:
+        matchLabels:
+          app: kube-prometheus-stack-prometheus
+    ports:
+    - protocol: TCP
+      port: 6379
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: redis-egress
+  namespace: firstlight
+  labels:
+    app: firstlight
+    component: redis
+    tier: security
+spec:
+  podSelector:
+    matchLabels:
+      app: firstlight
+      component: redis
+  policyTypes:
+  - Egress
+  egress:
+  # Allow DNS queries
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53

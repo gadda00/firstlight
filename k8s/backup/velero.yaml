@@ -1,0 +1,187 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: velero
+  labels:
+    app: velero
+    tier: backup
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: velero-credentials
+  namespace: velero
+  labels:
+    app: velero
+    tier: backup
+type: Opaque
+stringData:
+  # Replace with your actual credentials
+  # For AWS S3:
+  cloud: |
+    [default]
+    aws_access_key_id = YOUR_AWS_ACCESS_KEY
+    aws_secret_access_key = YOUR_AWS_SECRET_KEY
+  # For other providers, use appropriate configuration
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: velero-config
+  namespace: velero
+  labels:
+    app: velero
+    tier: backup
+data:
+  # Backup storage location configuration
+  backup-storage-location: |
+    {
+      "apiVersion": "velero.io/v1",
+      "kind": "BackupStorageLocation",
+      "metadata": {
+        "name": "default",
+        "namespace": "velero"
+      },
+      "spec": {
+        "provider": "aws",
+        "objectStorage": {
+          "bucket": "firstlight-backups"
+        },
+        "prefix": "velero",
+        "config": {
+          "region": "us-east-1"
+        }
+      }
+    }
+  # Volume snapshot location configuration
+  volume-snapshot-location: |
+    {
+      "apiVersion": "velero.io/v1",
+      "kind": "VolumeSnapshotLocation",
+      "metadata": {
+        "name": "default",
+        "namespace": "velero"
+      },
+      "spec": {
+        "provider": "aws",
+        "config": {
+          "region": "us-east-1"
+        }
+      }
+    }
+  # Backup schedule
+  backup-schedule: |
+    {
+      "apiVersion": "velero.io/v1",
+      "kind": "Schedule",
+      "metadata": {
+        "name": "daily-backup",
+        "namespace": "velero"
+      },
+      "spec": {
+        "schedule": "0 2 * * *",
+        "template": {
+          "ttl": "720h",
+          "includeClusterResources": true,
+          "labelSelector": {
+            "matchLabels": {
+              "app": "firstlight"
+            }
+          },
+          "snapshotVolumes": true
+        }
+      }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: velero
+  namespace: velero
+  labels:
+    app: velero
+    tier: backup
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: velero
+      tier: backup
+  template:
+    metadata:
+      labels:
+        app: velero
+        tier: backup
+    spec:
+      serviceAccountName: velero
+      containers:
+      - name: velero
+        image: velero/velero:v1.12.0
+        command:
+        - /velero
+        args:
+        - server
+        - --features=EnableCSI
+        - --backup-storage-location-config=/etc/velero/backup-storage-location
+        - --volume-snapshot-location-config=/etc/velero/volume-snapshot-location
+        - --secret-file=/etc/velero/credentials/cloud
+        - --log-level=info
+        - --log-format=text
+        volumeMounts:
+        - name: backup-storage-location
+          mountPath: /etc/velero/backup-storage-location
+          subPath: backup-storage-location
+        - name: volume-snapshot-location
+          mountPath: /etc/velero/volume-snapshot-location
+          subPath: volume-snapshot-location
+        - name: credentials
+          mountPath: /etc/velero/credentials
+      volumes:
+      - name: backup-storage-location
+        configMap:
+          name: velero-config
+      - name: volume-snapshot-location
+        configMap:
+          name: velero-config
+      - name: credentials
+        secret:
+          secretName: velero-credentials
+      nodeSelector:
+        kubernetes.io/arch: amd64
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: velero
+  namespace: velero
+  labels:
+    app: velero
+    tier: backup
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: velero-cluster-role
+  labels:
+    app: velero
+    tier: backup
+rules:
+- apiGroups: ["*"]
+  resources: ["*"]
+  verbs: ["*"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: velero-cluster-role-binding
+  labels:
+    app: velero
+    tier: backup
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: velero-cluster-role
+subjects:
+- kind: ServiceAccount
+  name: velero
+  namespace: velero

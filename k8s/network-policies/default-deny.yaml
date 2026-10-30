@@ -1,0 +1,40 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: firstlight
+  labels:
+    app: firstlight
+    tier: security
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress
+  # Deny all ingress traffic by default
+  ingress: []
+  # Deny all egress traffic by default
+  egress: []
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns
+  namespace: firstlight
+  labels:
+    app: firstlight
+    tier: security
+spec:
+  podSelector: {}
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53

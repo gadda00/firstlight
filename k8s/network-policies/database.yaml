@@ -1,0 +1,71 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: postgres-ingress
+  namespace: firstlight
+  labels:
+    app: firstlight
+    component: postgres
+    tier: security
+spec:
+  podSelector:
+    matchLabels:
+      app: firstlight
+      component: postgres
+  policyTypes:
+  - Ingress
+  ingress:
+  # Allow traffic from app pods only
+  - from:
+    - podSelector:
+        matchLabels:
+          app: firstlight
+          component: app
+    ports:
+    - protocol: TCP
+      port: 5432
+  # Allow traffic from python worker pods
+  - from:
+    - podSelector:
+        matchLabels:
+          app: firstlight
+          component: python-worker
+    ports:
+    - protocol: TCP
+      port: 5432
+  # Allow traffic from monitoring (for exporters)
+  - from:
+    - podSelector:
+        matchLabels:
+          app: kube-prometheus-stack-prometheus
+    ports:
+    - protocol: TCP
+      port: 5432
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: postgres-egress
+  namespace: firstlight
+  labels:
+    app: firstlight
+    component: postgres
+    tier: security
+spec:
+  podSelector:
+    matchLabels:
+      app: firstlight
+      component: postgres
+  policyTypes:
+  - Egress
+  egress:
+  # Allow DNS queries
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53

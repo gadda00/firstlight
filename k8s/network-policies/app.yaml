@@ -1,0 +1,104 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: app-ingress
+  namespace: firstlight
+  labels:
+    app: firstlight
+    component: app
+    tier: security
+spec:
+  podSelector:
+    matchLabels:
+      app: firstlight
+      component: app
+  policyTypes:
+  - Ingress
+  ingress:
+  # Allow traffic from nginx ingress
+  - from:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: ingress-nginx
+          app.kubernetes.io/component: controller
+    ports:
+    - protocol: TCP
+      port: 3000
+  # Allow traffic from other app pods (for internal communication)
+  - from:
+    - podSelector:
+        matchLabels:
+          app: firstlight
+    ports:
+    - protocol: TCP
+      port: 3000
+  # Allow health checks from kubelet
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+    ports:
+    - protocol: TCP
+      port: 3000
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: app-egress
+  namespace: firstlight
+  labels:
+    app: firstlight
+    component: app
+    tier: security
+spec:
+  podSelector:
+    matchLabels:
+      app: firstlight
+      component: app
+  policyTypes:
+  - Egress
+  egress:
+  # Allow egress to PostgreSQL
+  - to:
+    - podSelector:
+        matchLabels:
+          app: firstlight
+          component: postgres
+    ports:
+    - protocol: TCP
+      port: 5432
+  # Allow egress to Redis
+  - to:
+    - podSelector:
+        matchLabels:
+          app: firstlight
+          component: redis
+    ports:
+    - protocol: TCP
+      port: 6379
+  # Allow egress to MinIO
+  - to:
+    - podSelector:
+        matchLabels:
+          app: firstlight
+          component: minio
+    ports:
+    - protocol: TCP
+      port: 9000
+  # Allow egress to Python worker
+  - to:
+    - podSelector:
+        matchLabels:
+          app: firstlight
+          component: python-worker
+    ports:
+    - protocol: TCP
+      port: 5555
+  # Allow egress to Prometheus for metrics
+  - to:
+    - podSelector:
+        matchLabels:
+          app: kube-prometheus-stack-prometheus
+    ports:
+    - protocol: TCP
+      port: 9090
