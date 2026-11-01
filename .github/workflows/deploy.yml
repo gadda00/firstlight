@@ -31,6 +31,11 @@ env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
 
+# Read-only by default (this repo's default_workflow_permissions is `read`);
+# each job below declares only the extra scopes it actually needs.
+permissions:
+  contents: read
+
 jobs:
   # ===========================================================================
   # Quality Gates
@@ -74,6 +79,9 @@ jobs:
     name: Security Scan
     runs-on: ubuntu-latest
     needs: quality-gates
+    permissions:
+      contents: read
+      security-events: write   # upload-sarif fails without this (repo default is read-only)
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -100,6 +108,9 @@ jobs:
     name: Build App Docker Image
     runs-on: ubuntu-latest
     needs: security-scan
+    permissions:
+      contents: read
+      packages: write   # push to ghcr.io
     outputs:
       image_tag: ${{ steps.build.outputs.image_tag }}
     steps:
@@ -142,6 +153,9 @@ jobs:
     name: Build Python Worker Image
     runs-on: ubuntu-latest
     needs: security-scan
+    permissions:
+      contents: read
+      packages: write   # push to ghcr.io
     outputs:
       image_tag: ${{ steps.build.outputs.image_tag }}
     steps:
@@ -187,7 +201,12 @@ jobs:
     name: Deploy to Staging
     runs-on: ubuntu-latest
     needs: [build-app-image, build-python-image]
-    if: github.ref == 'refs/heads/main' || github.event.inputs.environment == 'staging'
+    # Deploys are DELIBERATE, not automatic: this repo has no AWS or Slack
+    # secrets configured (terraform targets and *.firstlight.example.com are
+    # roadmap placeholders), so running staging on every main push would be a
+    # guaranteed-red workflow — a false claim of a deploy path. Trigger via
+    # workflow_dispatch once real credentials exist.
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'staging'
     environment:
       name: staging
       url: https://staging.firstlight.example.com
