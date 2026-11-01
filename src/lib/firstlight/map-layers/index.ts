@@ -12,7 +12,7 @@
  * Integrates with MapLibre GL JS for rendering.
  * ========================================================================== */
 
-import type { LayerSpecification, SourceSpecification, StyleSpecification } from 'maplibre-gl';
+import type { FillLayerSpecification, LayerSpecification, SourceSpecification, StyleSpecification } from 'maplibre-gl';
 import type { DataSourceAdapter } from '@/lib/server/adapters/types';
 import type { DiscoveredAsset, NormalizedProduct } from '@/lib/server/adapters/types';
 
@@ -22,6 +22,9 @@ import type { DiscoveredAsset, NormalizedProduct } from '@/lib/server/adapters/t
 
 /** Unique layer identifier */
 export type LayerId = string;
+
+/** The four supported basemap styles (single source of truth). */
+export type BaseStyleId = 'satellite' | 'dark' | 'hybrid' | 'terrain';
 
 /** Layer group for organization */
 export type LayerGroup = 
@@ -88,7 +91,7 @@ export interface AdapterLayerSource {
 export interface MapLayerState {
   layers: Map<LayerId, LayerConfig>;
   groups: Map<LayerGroup, { visible: boolean; expanded: boolean }>;
-  baseStyle: 'satellite' | 'dark' | 'hybrid' | 'terrain';
+  baseStyle: BaseStyleId;
 }
 
 // ==========================================================================
@@ -96,7 +99,7 @@ export interface MapLayerState {
 // ==========================================================================
 
 /** Extended base styles with additional providers */
-export const BASE_STYLES: Record<string, () => StyleSpecification> = {
+export const BASE_STYLES: Record<BaseStyleId, () => StyleSpecification> = {
   satellite: () => ({
     version: 8,
     glyphs: 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf',
@@ -237,7 +240,7 @@ export function createImageryLayer(
     maxzoom: 24,
     paint: {
       'raster-opacity': 1,
-      'raster-saturate': 1,
+      'raster-saturation': 1,
       'raster-contrast': 1,
       'raster-brightness-min': 0,
       'raster-brightness-max': 1,
@@ -256,9 +259,9 @@ export function createImageryLayer(
       description: `Satellite imagery from ${adapter.label}`,
       adapterId: adapter.id,
       provider: adapter.label,
-      sourceUrl: asset.url,
+      sourceUrl: asset.url ?? undefined,
       license: adapter.license().name,
-      attribution: adapter.license().attribution,
+      attribution: adapter.license().attribution ?? undefined,
       timestamp: asset.acquiredAt ? new Date(asset.acquiredAt) : new Date(),
       isLive: adapter.health === 'live',
       zIndex,
@@ -269,11 +272,15 @@ export function createImageryLayer(
   };
 }
 
-/** Create vector layer from GeoJSON data */
+/** Create a FILL vector layer from GeoJSON data.
+ *
+ * Discriminated factory: this builder always emits a `fill` layer, so callers
+ * pass only fill paint/layout — no ambiguous layer-type unions. Line/circle
+ * variants get their own factories (createClusterLayer, …). */
 export function createGeoJsonLayer(
   id: LayerId,
   data: GeoJSON.FeatureCollection | GeoJSON.Feature,
-  style: Partial<LayerSpecification>,
+  style: Partial<Omit<FillLayerSpecification, 'id' | 'source' | 'type'>> = {},
   metadata: Partial<LayerMetadata> = {},
   group: LayerGroup = 'overlays',
 ): LayerConfig {
@@ -285,7 +292,7 @@ export function createGeoJsonLayer(
     data,
   };
 
-  const spec: LayerSpecification = {
+  const spec: FillLayerSpecification = {
     id: layerId,
     type: 'fill',
     source: sourceId,
@@ -538,7 +545,7 @@ export function createChoroplethLayer(
 export class LayerManager {
   private layers: Map<LayerId, LayerConfig> = new Map();
   private groups: Map<LayerGroup, { visible: boolean; expanded: boolean }> = new Map();
-  private baseStyle: keyof typeof BASE_STYLES = 'satellite';
+  private baseStyle: BaseStyleId = 'satellite';
   private zIndexCounter: number = 0;
 
   constructor() {
@@ -717,13 +724,13 @@ export class LayerManager {
       return createGeoJsonLayer(
         `geo-${adapter.id}-${asset.externalId}`,
         { type: 'FeatureCollection', features: [feature] },
-        { type: 'fill', paint: { 'fill-color': 'rgba(56, 189, 248, 0.3)' } },
+        { paint: { 'fill-color': 'rgba(56, 189, 248, 0.3)' } },
         {
           label: `${adapter.label}: ${asset.title}`,
           adapterId: adapter.id,
           provider: adapter.label,
           license: adapter.license().name,
-          attribution: adapter.license().attribution,
+          attribution: adapter.license().attribution ?? undefined,
         },
         group,
       );
@@ -733,7 +740,7 @@ export class LayerManager {
     return createGeoJsonLayer(
       `${adapter.id}-${asset.externalId}`,
       { type: 'FeatureCollection', features: [] },
-      { type: 'fill', paint: { 'fill-color': 'rgba(56, 189, 248, 0.3)' } },
+      { paint: { 'fill-color': 'rgba(56, 189, 248, 0.3)' } },
       {
         label: `${adapter.label}: ${asset.title}`,
         adapterId: adapter.id,
@@ -908,6 +915,9 @@ export function getAllLayerIds(layers: LayerConfig[]): LayerId[] {
 export const PREDEFINED_IMAGERY_LAYERS: Record<string, Partial<LayerConfig>> = {
   'planet-basemap': {
     metadata: {
+      id: 'planet-basemap',
+      group: 'imagery',
+      zIndex: 0,
       label: 'Planet Basemap',
       description: 'Global monthly mosaic from Planet Labs',
       provider: 'Planet Labs',
@@ -918,6 +928,9 @@ export const PREDEFINED_IMAGERY_LAYERS: Record<string, Partial<LayerConfig>> = {
   },
   'sentinel-2': {
     metadata: {
+      id: 'sentinel-2',
+      group: 'imagery',
+      zIndex: 1,
       label: 'Sentinel-2 Cloudless',
       description: 'Cloudless Sentinel-2 mosaic',
       provider: 'Sentinel Hub',
@@ -928,6 +941,9 @@ export const PREDEFINED_IMAGERY_LAYERS: Record<string, Partial<LayerConfig>> = {
   },
   'goes-16': {
     metadata: {
+      id: 'goes-16',
+      group: 'imagery',
+      zIndex: 2,
       label: 'GOES-16',
       description: 'Real-time weather satellite imagery',
       provider: 'NOAA',
@@ -938,6 +954,9 @@ export const PREDEFINED_IMAGERY_LAYERS: Record<string, Partial<LayerConfig>> = {
   },
   'maxar-opendata': {
     metadata: {
+      id: 'maxar-opendata',
+      group: 'imagery',
+      zIndex: 3,
       label: 'Maxar Open Data',
       description: 'High-resolution imagery for disaster response',
       provider: 'Maxar',
@@ -952,6 +971,8 @@ export const PREDEFINED_IMAGERY_LAYERS: Record<string, Partial<LayerConfig>> = {
 export const PREDEFINED_OVERLAY_LAYERS: Record<string, Partial<LayerConfig>> = {
   'flood-extent': {
     metadata: {
+      id: 'flood-extent',
+      zIndex: 10,
       label: 'Flood Extent',
       description: 'Areas affected by flooding',
       group: 'overlays',
@@ -960,6 +981,8 @@ export const PREDEFINED_OVERLAY_LAYERS: Record<string, Partial<LayerConfig>> = {
   },
   'damage-assessment': {
     metadata: {
+      id: 'damage-assessment',
+      zIndex: 11,
       label: 'Damage Assessment',
       description: 'Building damage classification',
       group: 'analysis',
@@ -968,6 +991,8 @@ export const PREDEFINED_OVERLAY_LAYERS: Record<string, Partial<LayerConfig>> = {
   },
   'population-density': {
     metadata: {
+      id: 'population-density',
+      zIndex: 12,
       label: 'Population Density',
       description: 'Population per square kilometer',
       group: 'analysis',
@@ -976,6 +1001,8 @@ export const PREDEFINED_OVERLAY_LAYERS: Record<string, Partial<LayerConfig>> = {
   },
   'weather-radar': {
     metadata: {
+      id: 'weather-radar',
+      zIndex: 5,
       label: 'Weather Radar',
       description: 'Real-time precipitation radar',
       group: 'realtime',

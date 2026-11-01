@@ -71,6 +71,13 @@ export const PLANET_ASSET_TYPES: PlanetAssetType[] = [
     bands: ['B', 'G', 'R', 'N'],
   },
   {
+    id: 'planet-skysatcollect',
+    label: 'SkySat Collect',
+    itemType: 'SkySatCollect',
+    resolution: '50cm-1m',
+    bands: ['B', 'G', 'R', 'N'],
+  },
+  {
     id: 'planet-psorthotile',
     label: 'PlanetScope Ortho Tile',
     itemType: 'PSOrthoTile',
