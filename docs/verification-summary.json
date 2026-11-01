@@ -1,0 +1,17 @@
+{
+  "commit": "6e23b8b1642a18ca05b0215a068b2f42e300eaa9",
+  "startedAt": "2026-11-01T04:04:18Z",
+  "finishedAt": "2026-11-01T04:05:25Z",
+  "runner": "scripts/verify.sh",
+  "testCounts": " 184 pass 0 fail ",
+  "gates": [
+    { "name": "install", "command": "bun install --frozen-lockfile", "status": "pass", "detail": "479 packages installed [2.93s]" },
+    { "name": "lint", "command": "bun run lint", "status": "pass", "detail": "✖ 1 problem (0 errors, 1 warning)" },
+    { "name": "typecheck", "command": "bun run typecheck", "status": "pass", "detail": "$ tsc --noEmit" },
+    { "name": "test", "command": "bun test", "status": "pass", "detail": "Ran 184 tests across 15 files. [7.38s]" },
+    { "name": "build", "command": "bun run build", "status": "pass", "detail": "ƒ  (Dynamic)  server-rendered on demand" },
+    { "name": "build:static", "command": "bun run build:static", "status": "pass", "detail": "restored src/app/api" },
+    { "name": "python-worker-tests", "command": "bash -c cd python && python3 -m unittest test_secure_download", "status": "pass", "detail": "OK" }
+  ],
+  "overall": "pass"
+}

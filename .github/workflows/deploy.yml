@@ -136,7 +136,7 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Output image tag
-        run: echo "App image: ${{ steps.build.outputs.tags }}"
+        run: 'echo "App image: ${{ steps.build.outputs.tags }}"' 
 
   build-python-image:
     name: Build Python Worker Image
@@ -178,7 +178,7 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Output image tag
-        run: echo "Python image: ${{ steps.build.outputs.tags }}"
+        run: 'echo "Python image: ${{ steps.build.outputs.tags }}"'
 
   # ===========================================================================
   # Deploy to Staging
