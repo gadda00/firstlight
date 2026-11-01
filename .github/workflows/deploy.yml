@@ -124,6 +124,11 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # type=gha cache import/export needs a docker-container driver builder;
+      # the default `docker` driver fails with "Cache export is not supported".
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Extract metadata
         id: meta
         uses: docker/metadata-action@v5
@@ -168,6 +173,11 @@ jobs:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      # type=gha cache import/export needs a docker-container driver builder;
+      # the default `docker` driver fails with "Cache export is not supported".
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
       - name: Extract metadata
         id: meta
