@@ -147,6 +147,7 @@ function StatusBar() {
   const runId = useFirstLight((s) => s.runId);
   const phase = useFirstLight((s) => s.phase);
   const serverError = useFirstLight((s) => s.serverError);
+  const layerProvenance = useFirstLight((s) => s.layerProvenance);
   const isDemo = demoModeEnabled();
 
   const stageTotal = raw?.stages.reduce((a, st) => a + st.ms, 0) ?? 0;
@@ -173,6 +174,17 @@ function StatusBar() {
               server-built layer · scores recomputed server-side
             </span>
           )}
+          {!isDemo && layerProvenance && (
+            <span
+              title={`${layerProvenance.label}\n\n${layerProvenance.notes.join('\n')}`}
+              className="hidden md:inline text-amber-300 border border-amber-500/40 bg-amber-500/10 rounded px-1.5 py-px"
+            >
+              ⚠ SYNTHETIC ANALYSIS · catalog {layerProvenance.catalogAssets} real asset(s)
+              {layerProvenance.sources.length > 0
+                ? ` · ${layerProvenance.sources.map((src) => `${src.adapterId}:${src.assets}`).join(' ')}`
+                : ' · none ingested'}
+            </span>
+          )}
           {isDemo && (
             <span className="hidden md:inline">
               pipeline {(stageTotal / 1000).toFixed(1)}s demo-scaled
@@ -185,8 +197,8 @@ function StatusBar() {
       <span>
         {isDemo
           ? 'FirstLight v2.2 · simulated demo data'
-          : raw?.demo
-            ? 'FirstLight v2.2 · OPERATIONAL · layer carries a labeled synthetic demo overlay'
+          : layerProvenance?.simulated
+            ? 'FirstLight v2.2 · OPERATIONAL · real-data catalog + SYNTHETIC analysis (labeled)'
             : 'FirstLight v2.2 · OPERATIONAL · server-built data'}
       </span>
       <span className="hidden md:inline">

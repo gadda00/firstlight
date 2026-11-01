@@ -20,7 +20,11 @@ import type { PrismaClient, Session, User } from '@prisma/client';
 import { errors } from './http';
 import type { Role } from './schemas';
 
-export const SESSION_TTL_MS = 24 * 60 * 60 * 1000; // 24 h
+// 8 h — a pilot working session. Shortened from 24 h in round 4: bearer
+// tokens live in sessionStorage for the pilot (labeled demo-grade in
+// SECURITY.md), so the blast radius of an exfiltrated token stays small.
+// The production upgrade (HttpOnly cookie + CSRF) can revisit this.
+export const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
 
 /** Retention for closed sessions before pruning (7 days, for audit recall). */
 const PRUNE_AFTER_MS = 7 * 24 * 60 * 60 * 1000;

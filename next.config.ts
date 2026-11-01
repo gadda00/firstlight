@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import { SECURITY_HEADERS } from "./src/lib/security-headers";
 
 /**
  * FirstLight — Next.js config.
@@ -17,14 +18,6 @@ import type { NextConfig } from "next";
  */
 const isStatic = process.env.BUILD_MODE === "static";
 
-/** Security headers for the operational (server) build. Static hosts apply
- * their own headers; these cover the Node/standalone deployment. */
-const securityHeaders = [
-  { key: "X-Content-Type-Options", value: "nosniff" },
-  { key: "X-Frame-Options", value: "DENY" },
-  { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
-  { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=(self)" },
-];
 
 const nextConfig: NextConfig = {
   ...(isStatic
@@ -36,7 +29,7 @@ const nextConfig: NextConfig = {
     : {
         output: "standalone",
         async headers() {
-          return [{ source: "/(.*)", headers: securityHeaders }];
+          return [{ source: "/(.*)", headers: [...SECURITY_HEADERS] }];
         },
       }),
   basePath: process.env.NEXT_PUBLIC_BASE_PATH || "",

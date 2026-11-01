@@ -19,6 +19,10 @@ beforeAll(async () => {
   rmSync(DB_PATH, { force: true });
   const url = `file:${DB_PATH}`;
   process.env.DATABASE_URL = url;
+  // The router/auth modules hold a process-wide Prisma singleton: reset it
+  // so THIS file's throwaway database is the one every dispatch uses.
+  const { resetDbForTests } = await import('@/lib/server/db');
+  resetDbForTests();
   // Push schema via programmatic prisma isn't available; we require the
   // caller (bun test) to have run `prisma db push` first. The helper below
   // shells out once.
@@ -37,7 +41,10 @@ afterAll(async () => {
 
 async function seedOrg() {
   return db.organization.create({
-    data: { slug: `test-org-${Date.now()}`, name: 'Test Org' },
+    data: {
+      slug: `test-org-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      name: 'Test Org',
+    },
   });
 }
 
@@ -650,6 +657,101 @@ describe('dispatch — authenticated layer endpoint round trip', () => {
     expect((json.data.popGrid as unknown[]).length).toBeGreaterThan(0);
     expect((json.data.meta as Record<string, unknown>).id).toBeDefined();
     expect(json.data.stats).toBeDefined();
+  });
+
+  test('layer response carries first-class provenance: synthetic analysis + real catalog split', async () => {
+    const { login, sha256 } = await import('@/lib/server/auth');
+    const org = await seedOrg();
+    const user = await db.user.create({
+      data: {
+        orgId: org.id,
+        email: `prov-${Date.now()}@t.test`,
+        name: 'Prov Test',
+        role: 'observer',
+        tokenHash: sha256('prov-token'),
+      },
+    });
+    const ev = await seedEvent(org.id, user.id);
+    const { bearer } = await login(db, user.email, 'prov-token');
+
+    // Ingest a REAL catalog record via the fixture adapter first.
+    const { runIngestion } = await import('@/lib/server/ingestion');
+    const { registerFixtureAdapter } = await import('./fixtures/fixture-adapter');
+    registerFixtureAdapter();
+    const ing = await runIngestion(db, {
+      eventId: ev.id,
+      orgId: org.id,
+      actorId: user.id,
+      adapterId: 'fixture-demo',
+      params: { n: 2 },
+      aoi: { lat: ev.centerLat, lng: ev.centerLng, aoiKm: ev.aoiKm },
+      timeWindow: { from: '2025-06-01T00:00:00Z', to: '2025-06-30T00:00:00Z' },
+      country: ev.country,
+    });
+    expect(ing.status).toBe('succeeded');
+
+    const { dispatch } = await import('@/server/api/router');
+    const res = await dispatch(
+      new Request(`https://x.test/api/events/${ev.id}/layer`, {
+        headers: { authorization: `Bearer ${bearer}` },
+      }),
+    );
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as { data: Record<string, unknown> };
+    const prov = json.data.provenance as Record<string, unknown>;
+
+    // The layer states its analysis mode and simulated flag FIRST-CLASS.
+    expect(prov.analysisMode).toBe('synthetic-scenario');
+    expect(prov.simulated).toBe(true);
+    expect(prov.label).toContain('synthetic');
+    // The real catalog the event actually ingested is enumerated...
+    expect(prov.catalogAssets).toBe(2);
+    expect((prov.sourceAssetIds as string[]).length).toBe(2);
+    const sources = prov.sources as Array<Record<string, unknown>>;
+    expect(sources).toHaveLength(1);
+    expect(sources[0].adapterId).toBe('fixture-demo');
+    expect(sources[0].assets).toBe(2);
+    expect(sources[0].freshestAcquiredAt).toBeTruthy();
+    // ...with full processing metadata and explicit caveats.
+    expect(prov.processingVersion).toBeTruthy();
+    expect(prov.crs).toBe('EPSG:4326');
+    expect((prov.temporalWindow as Record<string, string>).from).toBeTruthy();
+    expect(prov.qualityStatus).toBe('computed-from-synthetic-scenario');
+    const notes = prov.notes as string[];
+    expect(notes.length).toBeGreaterThanOrEqual(3);
+    expect(notes.some((n) => n.includes('SYNTHETIC SCENARIO'))).toBe(true);
+  });
+
+  test('layer provenance for an event with NO ingest is honestly empty (and says so)', async () => {
+    const { login, sha256 } = await import('@/lib/server/auth');
+    const org = await seedOrg();
+    const user = await db.user.create({
+      data: {
+        orgId: org.id,
+        email: `prov0-${Date.now()}@t.test`,
+        name: 'Prov0 Test',
+        role: 'observer',
+        tokenHash: sha256('prov0-token'),
+      },
+    });
+    const ev = await seedEvent(org.id, user.id);
+    const { bearer } = await login(db, user.email, 'prov0-token');
+
+    const { dispatch } = await import('@/server/api/router');
+    const res = await dispatch(
+      new Request(`https://x.test/api/events/${ev.id}/layer`, {
+        headers: { authorization: `Bearer ${bearer}` },
+      }),
+    );
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as { data: Record<string, unknown> };
+    const prov = json.data.provenance as Record<string, unknown>;
+    expect(prov.catalogAssets).toBe(0);
+    expect(prov.sourceAssetIds).toEqual([]);
+    expect((prov.notes as string[]).some((n) => n.includes('No provider assets'))).toBe(true);
+    // Still simulated, still labeled.
+    expect(prov.simulated).toBe(true);
+    expect(prov.analysisMode).toBe('synthetic-scenario');
   });
 
   test('unauthenticated layer request gets a proper 401 envelope (never a 500)', async () => {

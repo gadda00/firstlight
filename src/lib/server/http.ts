@@ -13,6 +13,7 @@
 import { randomBytes } from 'node:crypto';
 import { ZodError, type ZodType } from 'zod';
 
+import { SECURITY_HEADERS } from '../security-headers';
 export interface ErrorBody {
   error: {
     code: string;
@@ -73,12 +74,16 @@ export function jsonResponse(
   requestId: string,
   headers: Record<string, string> = {},
 ): Response {
+  // Same security posture as the HTML surface (single source: security-headers.ts).
+  const security: Record<string, string> = {};
+  for (const h of SECURITY_HEADERS) security[h.key] = h.value;
   return new Response(JSON.stringify(body), {
     status,
     headers: {
       'content-type': 'application/json; charset=utf-8',
       'x-request-id': requestId,
       'cache-control': 'no-store',
+      ...security,
       ...headers,
     },
   });

@@ -1,180 +1,198 @@
-version: '3.8'
+# FirstLight — deployment topology (round 4).
+#
+# Two EXPLICIT profiles; nothing is implied:
+#
+#   demo   — the deterministic offline demo: ONE app container (SQLite,
+#            DEMO_MODE=true), no database/redis/worker claims. Safe to run
+#            anywhere; makes no operational promises.
+#            `docker compose --profile demo up`
+#
+#   pilot  — the operational pilot: app + PostgreSQL/PostGIS + Redis +
+#            Python worker + MinIO. ONE persistence model (PostgreSQL) for
+#            app AND worker — the round3 split-brain (app SQLite / worker
+#            Postgres) is fixed. Migrations run via a one-shot
+#            `prisma migrate deploy` service (NEVER `db push` in production).
+#            Internal services are NOT published; only the app port is.
+#            `POSTGRES_PASSWORD` etc. are REQUIRED (no defaults) and
+#            scripts/check-pilot-secrets.sh fails startup on weak values.
+#            `docker compose --profile pilot up`
+#
+#   monitoring — optional observability stack (Prometheus/Grafana/OTEL),
+#            pinned images, network-internal only.
+#
+# Image pins are deliberate (never :latest). Verify/rotate them in your
+# own environment; see DEPLOY.md "Image pinning policy".
 
 services:
-  # ===========================================================================
-  # FirstLight Application
-  # ===========================================================================
-  app:
+  # =========================================================================
+  # DEMO profile — deterministic offline demo (single container)
+  # =========================================================================
+  app-demo:
+    profiles: ["demo"]
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: firstlight-app
+      args:
+        DB_PROVIDER: sqlite
+        APP_MODE: demo
+    container_name: firstlight-demo
     restart: unless-stopped
     ports:
       - "3000:3000"
     environment:
       - NODE_ENV=production
       - PORT=3000
+      - DEMO_MODE=true
+      - NEXT_PUBLIC_DEMO_MODE=true
       - DATABASE_URL=file:/app/db/firstlight.db
+    volumes:
+      - demo_db:/app/db
+    # Demo is self-contained: NO postgres/redis/worker dependencies.
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    mem_limit: 512m
+    cpus: 1.0
+    networks:
+      - firstlight-network
+
+  # =========================================================================
+  # PILOT profile — operational deployment
+  # =========================================================================
+  app:
+    profiles: ["pilot"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        DB_PROVIDER: postgres
+        APP_MODE: operational
+    container_name: firstlight-app
+    restart: unless-stopped
+    # NOT published directly — the nginx ingress is the only public surface.
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
       - DEMO_MODE=false
       - NEXT_PUBLIC_DEMO_MODE=false
-      # Provider tokens (set via .env file or environment)
+      - "DATABASE_URL=postgresql://firstlight:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set (see .env.example)}@postgres:5432/firstlight"
+      # App admin token for the seeded pilot account (secrets gate enforces length).
+      - "APP_ADMIN_TOKEN=${APP_ADMIN_TOKEN:?APP_ADMIN_TOKEN must be set (>= 16 chars)}"
+      # Provider tokens (optional; adapters report blocked without them)
       - FIRSTLIGHT_FIRMS_TOKEN=${FIRSTLIGHT_FIRMS_TOKEN:-}
       - FIRSTLIGHT_COPERNICUS_USERNAME=${FIRSTLIGHT_COPERNICUS_USERNAME:-}
       - FIRSTLIGHT_COPERNICUS_PASSWORD=${FIRSTLIGHT_COPERNICUS_PASSWORD:-}
-    volumes:
-      - ./db:/app/db
-      - ./logs:/app/logs
+    # PILOT command override: fail fast on weak/missing secrets, then serve.
+    # (The image's default CMD does a SQLite `db push` — dev/demo only.)
+    command: ["sh", "-c", "scripts/check-pilot-secrets.sh && bun run start"]
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       redis:
-        condition: service_healthy
-      postgres:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/health"]
       interval: 30s
-      timeout: 3s
+      timeout: 5s
       retries: 3
-      start_period: 10s
+      start_period: 20s
+    mem_limit: 1g
+    cpus: 1.5
     networks:
       - firstlight-network
 
-  # ===========================================================================
-  # PostgreSQL Database (Production)
-  # ===========================================================================
+  # One-shot migration: `prisma migrate deploy` against PostgreSQL. Runs
+  # BEFORE the app starts (service_completed_successfully) and is the ONLY
+  # thing allowed to change the pilot schema. `db push` is dev/CI only.
+  migrate:
+    profiles: ["pilot"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        DB_PROVIDER: postgres
+        APP_MODE: operational
+    container_name: firstlight-migrate
+    restart: "no"
+    entrypoint:
+      - sh
+      - -c
+      - |
+        scripts/check-pilot-secrets.sh --all && bunx prisma migrate deploy
+    environment:
+      - "DATABASE_URL=postgresql://firstlight:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@postgres:5432/firstlight"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - firstlight-network
+
   postgres:
+    profiles: ["pilot"]
     image: postgis/postgis:16-3.4
     container_name: firstlight-postgres
     restart: unless-stopped
     environment:
       - POSTGRES_DB=firstlight
       - POSTGRES_USER=firstlight
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-firstlight_pass}
+      - "POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set (no defaults in pilot)}"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./scripts/init-postgres.sql:/docker-entrypoint-initdb.d/init.sql
-    ports:
-      - "5432:5432"
+    # NOT published — postgres is reachable only inside the network.
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U firstlight -d firstlight"]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
+    mem_limit: 1g
+    cpus: 1.0
     networks:
       - firstlight-network
 
-  # ===========================================================================
-  # Redis (Caching & Queue)
-  # ===========================================================================
   redis:
-    image: redis:7-alpine
+    profiles: ["pilot"]
+    image: redis:7.2-alpine
     container_name: firstlight-redis
     restart: unless-stopped
     command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
     volumes:
       - redis_data:/data
-    ports:
-      - "6379:6379"
+    # NOT published — redis is reachable only inside the network.
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 3s
-      retries: 3
+      retries: 5
+    mem_limit: 384m
     networks:
       - firstlight-network
 
-  # ===========================================================================
-  # MinIO (Object Storage - S3 Compatible)
-  # ===========================================================================
   minio:
-    image: minio/minio:latest
+    profiles: ["pilot"]
+    image: minio/minio:RELEASE.2024-07-16T23-46-41Z
     container_name: firstlight-minio
     restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
-      - MINIO_ROOT_USER=${MINIO_ROOT_USER:-minioadmin}
-      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-minioadmin}
+      - "MINIO_ROOT_USER=${MINIO_ROOT_USER:?MINIO_ROOT_USER must be set}"
+      - "MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD must be set (no minioadmin default)}"
     volumes:
       - minio_data:/data
-    ports:
-      - "9000:9000"
-      - "9001:9001"
+    # NOT published (API 9000 / console 9001 are network-internal).
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
-      interval: 10s
+      interval: 15s
       timeout: 5s
       retries: 3
+    mem_limit: 512m
     networks:
       - firstlight-network
 
-  # ===========================================================================
-  # Prometheus (Monitoring)
-  # ===========================================================================
-  prometheus:
-    image: prom/prometheus:latest
-    container_name: firstlight-prometheus
-    restart: unless-stopped
-    volumes:
-      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
-      - prometheus_data:/prometheus
-    ports:
-      - "9090:9090"
-    command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-      - '--web.console.libraries=/etc/prometheus/console_libraries'
-      - '--web.console.templates=/etc/prometheus/consoles'
-      - '--web.enable-lifecycle'
-    networks:
-      - firstlight-network
-
-  # ===========================================================================
-  # Grafana (Visualization)
-  # ===========================================================================
-  grafana:
-    image: grafana/grafana:latest
-    container_name: firstlight-grafana
-    restart: unless-stopped
-    volumes:
-      - grafana_data:/var/lib/grafana
-      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
-    ports:
-      - "3001:3000"
-    environment:
-      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
-      - GF_USERS_ALLOW_SIGN_UP=false
-    depends_on:
-      prometheus:
-        condition: service_started
-    networks:
-      - firstlight-network
-
-  # ===========================================================================
-  # OpenTelemetry Collector
-  # ===========================================================================
-  otel-collector:
-    image: otel/opentelemetry-collector:latest
-    container_name: firstlight-otel-collector
-    restart: unless-stopped
-    volumes:
-      - ./monitoring/otel-config.yaml:/etc/otel-config.yaml
-    command: ["--config=/etc/otel-config.yaml"]
-    ports:
-      - "4317:4317"  # OTLP gRPC
-      - "4318:4318"  # OTLP HTTP
-      - "8888:8888"  # Metrics
-      - "8889:8889"  # Internal
-    depends_on:
-      prometheus:
-        condition: service_started
-    networks:
-      - firstlight-network
-
-  # ===========================================================================
-  # Python Worker (Raster Processing)
-  # ===========================================================================
   python-worker:
+    profiles: ["pilot"]
     build:
       context: .
       dockerfile: Dockerfile.python
@@ -183,43 +201,111 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - REDIS_URL=redis://redis:6379/0
-      - DATABASE_URL=postgresql://firstlight:firstlight_pass@postgres:5432/firstlight
+      # SAME database as the app — one persistence model (round3 had
+      # app=SQLite / worker=Postgres split-brain).
+      - "DATABASE_URL=postgresql://firstlight:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@postgres:5432/firstlight"
+      - S3_ENDPOINT_URL=http://minio:9000
+      - S3_ACCESS_KEY=${MINIO_ROOT_USER:-}
+      - S3_SECRET_KEY=${MINIO_ROOT_PASSWORD:-}
+      - FIRSTLIGHT_DOWNLOAD_ALLOWLIST=${FIRSTLIGHT_DOWNLOAD_ALLOWLIST:-}
     volumes:
-      - ./python:/app/python
+      - worker_tmp:/tmp
     depends_on:
       redis:
         condition: service_healthy
       postgres:
         condition: service_healthy
+    mem_limit: 2g
+    cpus: 2.0
     networks:
       - firstlight-network
 
-  # ===========================================================================
-  # Nginx (Reverse Proxy & Load Balancer)
-  # ===========================================================================
+  # =========================================================================
+  # MONITORING profile — optional, network-internal only
+  # =========================================================================
+  prometheus:
+    profiles: ["monitoring"]
+    image: prom/prometheus:v2.53.4
+    container_name: firstlight-prometheus
+    restart: unless-stopped
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+    # NOT published.
+    mem_limit: 512m
+    networks:
+      - firstlight-network
+
+  grafana:
+    profiles: ["monitoring"]
+    image: grafana/grafana:11.0.0
+    container_name: firstlight-grafana
+    restart: unless-stopped
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - "GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD must be set (no admin/admin default)}"
+      - GF_USERS_ALLOW_SIGN_UP=false
+    # NOT published — reach Grafana via an SSH tunnel or a reverse proxy
+    # you control: `docker compose exec grafana ...` / port-forward.
+    depends_on:
+      - prometheus
+    mem_limit: 512m
+    networks:
+      - firstlight-network
+
+  otel-collector:
+    profiles: ["monitoring"]
+    image: otel/opentelemetry-collector:0.98.0
+    container_name: firstlight-otel-collector
+    restart: unless-stopped
+    volumes:
+      - ./monitoring/otel-config.yaml:/etc/otel-config.yaml:ro
+    command: ["--config=/etc/otel-config.yaml"]
+    # NOT published.
+    depends_on:
+      - prometheus
+    mem_limit: 256m
+    networks:
+      - firstlight-network
+
+  # Public ingress for the pilot — the ONLY service with published ports.
+  # Mount real certificates at ./certs (see nginx/conf.d); the bundled
+  # config serves HTTP on 80 and expects TLS material when enabled.
   nginx:
-    image: nginx:alpine
+    profiles: ["pilot"]
+    image: nginx:1.27-alpine
     container_name: firstlight-nginx
     restart: unless-stopped
     ports:
       - "80:80"
       - "443:443"
     volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
-      - ./nginx/conf.d:/etc/nginx/conf.d
-      - ./certs:/etc/nginx/certs
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./certs:/etc/nginx/certs:ro
     depends_on:
       app:
         condition: service_healthy
+    mem_limit: 128m
     networks:
       - firstlight-network
 
 volumes:
+  demo_db:
   postgres_data:
   redis_data:
   minio_data:
   prometheus_data:
   grafana_data:
+  worker_tmp:
 
 networks:
   firstlight-network:

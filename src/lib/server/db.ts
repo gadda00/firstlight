@@ -63,4 +63,27 @@ function getDb(): PrismaClient {
   }
 }
 
-export const db = getDb();
+/** The app-wide client. A live FORWARDING proxy, not a snapshot: every
+ *  property access resolves the CURRENT cached instance so the test reset
+ *  below is actually honored by modules that imported `db` earlier. */
+export const db: PrismaClient = new Proxy({} as PrismaClient, {
+  get(_target, prop, _receiver) {
+    const current = getDb() as unknown as Record<string | symbol, unknown>;
+    const value = current[prop as string | symbol];
+    return typeof value === 'function' ? (value as (...a: unknown[]) => unknown).bind(current) : value;
+  },
+});
+
+/** TEST HOOK ONLY: bun:test runs every file in ONE process, and the
+ *  router/auth modules import this singleton. A test file that sets its own
+ *  DATABASE_URL must reset the singleton FIRST — otherwise the previous
+ *  file's client (possibly pointed at a since-deleted throwaway database)
+ *  silently serves every later dispatch. Production code must never call this. */
+export function resetDbForTests(): void {
+  const g = globalThis as unknown as { firstlightPrisma?: PrismaClient };
+  const existing = g.firstlightPrisma;
+  g.firstlightPrisma = undefined;
+  if (existing) {
+    void existing.$disconnect().catch(() => undefined);
+  }
+}

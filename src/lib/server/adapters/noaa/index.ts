@@ -18,7 +18,7 @@
  * - https://www.star.nesdis.noaa.gov/star/GOES.php
  * ========================================================================== */
 
-import type { DataSourceAdapter, DiscoveredAsset, DiscoveryRequest, ProcessingContext, NormalizedProduct, AdapterDeps } from '../types';
+import type { AcquireDestination, AcquiredAsset, AdapterDeps, DataSourceAdapter, DiscoveredAsset, DiscoveryRequest, NormalizedProduct, ProcessingContext, ValidationReport } from '../types';
 import { validGeometry, aoiToBbox, BlockedDependencyError } from '../types';
 import { httpClient } from '../http-client';
 
@@ -541,15 +541,15 @@ async function discoverTidesCurrents(
  */
 async function acquireNOAA(
   asset: DiscoveredAsset,
-  dest: { mode: 'reference' | 'buffer'; maxBytes: number },
+  dest: AcquireDestination,
   config: NOAAConfig,
   deps?: AdapterDeps,
-): Promise<{ mode: 'reference' | 'buffer'; sizeBytes: number | null; sha256: string | null }> {
+): Promise<AcquiredAsset> {
   // For reference mode, just return the URL
   if (dest.mode === 'reference') {
     return {
       mode: 'reference',
-      sizeBytes: null,
+      sizeBytes: 0,
       sha256: null,
     };
   }
@@ -577,7 +577,7 @@ async function acquireNOAA(
     console.error('NOAA acquisition error:', error);
     return {
       mode: 'reference',
-      sizeBytes: null,
+      sizeBytes: 0,
       sha256: null,
     };
   }
@@ -588,8 +588,8 @@ async function acquireNOAA(
  */
 async function validateNOAA(
   asset: DiscoveredAsset,
-  acquired: { mode: 'reference' | 'buffer'; sizeBytes: number | null; sha256: string | null },
-): Promise<{ ok: boolean; checks: Array<{ name: string; ok: boolean; detail?: string }> }> {
+  acquired: AcquiredAsset,
+): Promise<ValidationReport> {
   const checks = [
     {
       name: 'external_id_exists',
@@ -628,7 +628,7 @@ async function validateNOAA(
  */
 async function normalizeNOAA(
   asset: DiscoveredAsset,
-  acquired: { mode: 'reference' | 'buffer'; sizeBytes: number | null; sha256: string | null },
+  acquired: AcquiredAsset,
   ctx: ProcessingContext,
 ): Promise<NormalizedProduct[]> {
   const assetType = NOAA_ASSET_TYPES.find(t => t.id === asset.assetType);
@@ -644,7 +644,7 @@ async function normalizeNOAA(
       publishedAt: asset.publishedAt ? new Date(asset.publishedAt) : null,
       license: NOAA_LICENSE.name,
       attribution: NOAA_LICENSE.attribution,
-      url: asset.url,
+      url: asset.url ?? null,
       checksumSha256: acquired.sha256,
       sizeBytes: acquired.sizeBytes,
       quality: {
@@ -654,7 +654,7 @@ async function normalizeNOAA(
         category: assetType?.category || 'unknown',
         resolution: assetType?.resolution || 'unknown',
       },
-      geometry: asset.geometry,
+      geometry: asset.geometry ?? null,
       status: 'discovered',
       simulated: false,
     },
@@ -680,16 +680,16 @@ export const noaaAdapter: DataSourceAdapter = {
     return discoverNOAA(req, config, deps);
   },
   
-  async acquire(asset: DiscoveredAsset, dest: { mode: 'reference' | 'buffer'; maxBytes: number }, deps?: AdapterDeps): Promise<{ mode: 'reference' | 'buffer'; sizeBytes: number | null; sha256: string | null }> {
+  async acquire(asset: DiscoveredAsset, dest: AcquireDestination, deps?: AdapterDeps): Promise<AcquiredAsset> {
     const config = getConfig(deps);
     return acquireNOAA(asset, dest, config, deps);
   },
   
-  async validate(asset: DiscoveredAsset, acquired: { mode: 'reference' | 'buffer'; sizeBytes: number | null; sha256: string | null }): Promise<{ ok: boolean; checks: Array<{ name: string; ok: boolean; detail?: string }> }> {
+  async validate(asset: DiscoveredAsset, acquired: AcquiredAsset): Promise<ValidationReport> {
     return validateNOAA(asset, acquired);
   },
   
-  async normalize(asset: DiscoveredAsset, acquired: { mode: 'reference' | 'buffer'; sizeBytes: number | null; sha256: string | null }, ctx: ProcessingContext): Promise<NormalizedProduct[]> {
+  async normalize(asset: DiscoveredAsset, acquired: AcquiredAsset, ctx: ProcessingContext): Promise<NormalizedProduct[]> {
     return normalizeNOAA(asset, acquired, ctx);
   },
 };

@@ -2,7 +2,7 @@
   "name": "firstlight",
   "version": "2.1.0",
   "private": true,
-  "description": "FirstLight — Geo-AI decision layer for disaster response: damage & flood detection, H3 priority zoning, isolation analysis, grounded sitreps. Simulated demo platform.",
+  "description": "FirstLight — Geo-AI decision layer for disaster response: damage & flood detection, H3 priority zoning, isolation analysis, grounded sitreps. Two modes: labeled simulated demo + operational pilot (real open-data catalog, SYNTHETIC analysis layer — labeled, see PROVENANCE_SPEC.md).",
   "scripts": {
     "dev": "next dev -p 3000",
     "build": "next build",
@@ -13,7 +13,8 @@
     "test": "bun test",
     "db:push": "prisma db push",
     "db:seed": "tsx prisma/seed.ts",
-    "verify": "bun run lint && bun run typecheck && bun test"
+    "verify": "bun run lint && bun run typecheck && bun test",
+    "verify:full": "bash scripts/verify.sh"
   },
   "dependencies": {
     "@prisma/client": "^6.11.1",
@@ -43,6 +44,7 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "@types/geojson": "7946.0.16",
     "@types/node": "^22",
     "@types/react": "^19",
     "@types/react-dom": "^19",

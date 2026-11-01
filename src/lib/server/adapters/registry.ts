@@ -45,12 +45,24 @@ export function adapterById(id: string): DataSourceAdapter | undefined {
   return byId.get(id);
 }
 
-/** Test/extension hook: register an additional adapter (e.g. fixtures). */
+/** Test/extension hook: register an additional adapter (e.g. fixtures).
+ *  Idempotent by id — an already-registered id is left untouched. */
 export function registerAdapter(adapter: DataSourceAdapter): void {
   if (!byId.has(adapter.id)) {
     ADAPTERS.push(adapter);
     byId.set(adapter.id, adapter);
   }
+}
+
+/** Test hook: install/REPLACE a registered adapter by id. Test files run in
+ *  one process and share this registry — without replacement, a fixture
+ *  registered by an earlier file silently wins and later files test the
+ *  WRONG instance. Production code must never call this. */
+export function replaceAdapter(adapter: DataSourceAdapter): void {
+  const idx = ADAPTERS.findIndex((a) => a.id === adapter.id);
+  if (idx >= 0) ADAPTERS[idx] = adapter;
+  else ADAPTERS.push(adapter);
+  byId.set(adapter.id, adapter);
 }
 
 export function providerManifest() {

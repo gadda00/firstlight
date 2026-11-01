@@ -44,10 +44,11 @@ jobs:
       - name: Unit + integration + contract tests
         run: bun test
 
-      - name: Operational server build (type-validated)
+      - name: Operational server build (type-validated, client bundle operational)
         run: bun run build
         env:
           DEMO_MODE: "false"
+          NEXT_PUBLIC_DEMO_MODE: "false"
 
       - name: Static demo build (API route excluded)
         run: bun run build:static

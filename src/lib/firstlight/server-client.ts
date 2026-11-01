@@ -18,6 +18,15 @@ import type { ScoreManifest } from './scoring';
 
 /* ------------------------------------------------------------------ session */
 
+// PILOT-GRADE (labeled, deliberately): the bearer token is kept in
+// sessionStorage for the pilot. Any XSS in the page can read it — this is
+// acceptable ONLY for a bounded pilot and is documented in SECURITY.md
+// ("Authentication"), together with the mitigation set shipped alongside
+// it: 8-hour session TTL, server-side revocation on logout, strict CSP +
+// security headers on every response, tokens never placed in URLs/logs/
+// error envelopes/exports. The production upgrade is an HttpOnly,
+// SameSite=Strict session cookie with CSRF protection — the server-side
+// seam (login/logout/revoke) already supports swapping that in.
 const SESSION_KEY = 'firstlight.session';
 
 export interface ClientSession {
@@ -135,6 +144,27 @@ export interface LayerResponse {
     demoLayer: boolean;
   };
   demo: EventRawData['demo'];
+  /** First-class honesty block: what the analysis is computed from. */
+  provenance: {
+    analysisMode: 'synthetic-scenario';
+    simulated: true;
+    label: string;
+    sourceAssetIds: string[];
+    sources: Array<{
+      adapterId: string;
+      assets: number;
+      simulated: number;
+      freshestAcquiredAt: string | null;
+      stalestAcquiredAt: string | null;
+    }>;
+    catalogAssets: number;
+    simulatedCatalogAssets: number;
+    processingVersion: string;
+    crs: string;
+    temporalWindow: { from: string; to: string };
+    qualityStatus: string;
+    notes: string[];
+  };
   manifest: ScoreManifest;
   stats: EventDecisionData['stats'];
   zones: EventDecisionData['zones'];
@@ -153,7 +183,13 @@ export interface LayerResponse {
  * (the only non-JSON member, zoneIndex, is reconstructed here). */
 export async function fetchEventLayer(
   eventId: string,
-): Promise<{ raw: EventRawData; decision: EventDecisionData; event: LayerResponse['event']; manifest: ScoreManifest }> {
+): Promise<{
+  raw: EventRawData;
+  decision: EventDecisionData;
+  event: LayerResponse['event'];
+  manifest: ScoreManifest;
+  provenance: LayerResponse['provenance'];
+}> {
   const r = await apiFetch<LayerResponse>(`/events/${encodeURIComponent(eventId)}/layer`);
   const raw: EventRawData = {
     meta: r.meta,
@@ -172,7 +208,7 @@ export async function fetchEventLayer(
     stats: r.stats,
     routes: [],
   };
-  return { raw, decision, event: r.event, manifest: r.manifest };
+  return { raw, decision, event: r.event, manifest: r.manifest, provenance: r.provenance };
 }
 
 /* ------------------------------------------------------- review / sitrep / exports */

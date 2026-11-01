@@ -66,6 +66,8 @@ export interface FirstLightState {
   serverEvents: ServerEventSummary[];
   activeServerEventId: string | null;
   activeServerEventName: string | null;
+  /** Server-provided honesty block for the currently loaded layer (operational). */
+  layerProvenance: import('@/lib/firstlight/server-client').LayerResponse['provenance'] | null;
   serverBusy: boolean;
   serverError: string | null;
 
@@ -134,6 +136,7 @@ export const useFirstLight = create<FirstLightState>((set, get) => ({
   serverEvents: [],
   activeServerEventId: null,
   activeServerEventName: null,
+  layerProvenance: null,
   serverBusy: false,
   serverError: null,
 
@@ -207,15 +210,17 @@ export const useFirstLight = create<FirstLightState>((set, get) => ({
       reviewClasses: new Map(),
       serverBusy: true,
       serverError: null,
+      layerProvenance: null,
       activeServerEventId: eventId,
     });
     try {
-      const { raw, decision, event } = await fetchEventLayer(eventId);
+      const { raw, decision, event, provenance } = await fetchEventLayer(eventId);
       set({
         eventId: event.id,
         activeServerEventName: event.name,
         raw,
         decision,
+        layerProvenance: provenance,
         runId: `srv-${event.id.slice(0, 8)}`,
         phase: 'done',
         stageIndex: raw.stages.length,

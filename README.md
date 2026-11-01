@@ -24,11 +24,13 @@ Deploy your own demo in one click:
 
 ## Operational mode (server, authenticated, real data)
 
+> **What the operational pilot is — stated plainly:** a **real-data catalog + synthetic analysis demo**. Open-data providers (USGS, NWS, Copernicus, Open-Meteo, OSM) populate a genuine, checksummed asset catalog, but the damage/flood **analysis geometry is still the labeled synthetic scenario** — no raster→product processing exists yet (the Python worker reports every raster/ML task as `blocked_scaffold` with its exact missing dependency). Every served layer carries a first-class `provenance` block (`analysisMode: synthetic-scenario`, source asset IDs, processing version, CRS, caveats) and the UI shows a `⚠ SYNTHETIC ANALYSIS` badge beside the layer. See `PROVENANCE_SPEC.md`.
+
 The operational pilot adds (all verified by an automated 59-check browser suite that drives the real UI, not just the API):
 
-- **Persistence** — SQLite pilot store via Prisma (schema designed to migrate to PostgreSQL + PostGIS; see `ARCHITECTURE.md`): organizations, users, sessions, events, asset catalog, ingestion runs/attempts, review tasks + immutable decisions, versioned score configs, sitrep drafts/claims/approvals, export artifacts, offline bundles, and an append-only **SHA-256 audit chain**.
+- **Persistence** — SQLite dev store via Prisma (`db push`); the **pilot Docker profile runs one shared PostgreSQL/PostGIS** for app AND worker with `prisma migrate deploy` (`docker-compose.yml` profiles `demo`/`pilot`, plus `prisma/schema.postgres.prisma`): organizations, users, sessions, events, asset catalog, ingestion runs/attempts, review tasks + immutable decisions, versioned score configs, sitrep drafts/claims/approvals, export artifacts, offline bundles, and an append-only **SHA-256 audit chain**.
 - **Auth & RBAC** — 192-bit hashed bearer sessions; capability lattice (observer/analyst/reviewer/approver/admin); org isolation; login/logout audited. Pilot uses seeded account tokens; production path is OIDC/SAML (documented seam).
-- **Real open-data ingestion** — `DataSourceAdapter` contract with retries, backoff, timeouts, bounded bodies, SSRF host allowlists, and checksums. **Live now:** USGS earthquake feed, NOAA/NWS alerts, Open-Meteo GloFAS discharge, Copernicus STAC metadata, bounded OSM Overpass. **Blocked honestly:** NASA FIRMS (needs free `MAP_TOKEN`). **Fixture-only:** WorldPop (raster intersection deferred).
+- **Real open-data ingestion** — `DataSourceAdapter` contract with retries, backoff, timeouts, bounded bodies, SSRF host allowlists, and checksums. **Live now:** USGS earthquake feed, NOAA/NWS alerts, Open-Meteo GloFAS discharge, Copernicus STAC metadata, bounded OSM Overpass. **Blocked honestly:** NASA FIRMS (needs free `FIRSTLIGHT_FIRMS_TOKEN`, a NASA FIRMS MAP_TOKEN). **Fixture-only:** WorldPop (raster intersection deferred).
 - **Grounded sitreps** — every number comes from a typed query tool; claims cite catalog asset IDs and carry quality notes; approval **freezes** the claim set by SHA-256 hash (two-person rule: generator ≠ approver).
 - **Scoring v2** — versioned score manifest, area-weighted flood share (true polygon∩hexagon clipping), uncertainty bounds, ±25% sensitivity analysis, missingness penalties, and a `not enough evidence` outcome instead of forced tiers.
 - **Exports & offline bundles v2** — server-built, checksummed, provenance-stamped; bundles carry per-layer checksums, expiry, and revocation with import-side validation.
@@ -60,12 +62,14 @@ python3 scripts/browser-smoke.py          # 59 checks: login→ingest→review�
 ```bash
 bun run lint        # eslint — 0 errors
 bun run typecheck   # tsc --noEmit — HARD gate (ignoreBuildErrors removed in Phase 0)
-bun test            # 148 unit + integration + contract tests
+bun test            # 186 unit + integration + contract tests (round 4: +19 ingestion identity/concurrency/window, +6 registry import coverage, +2 layer provenance)
 bun run build       # operational build (type-validated)
 bun run build:static  # demo build (API route excluded — a static build never ships a server)
 ```
 
 CI (`.github/workflows/ci.yml`) runs all of the above with a **frozen lockfile and no fallback**. `bun.lock` is committed.
+
+`bun run verify:full` (scripts/verify.sh) reruns every gate from a clean state and writes **docs/verification-summary.json** (commit SHA, timestamps, per-gate results, test counts). Acceptance tables and status claims are generated from that artifact — never hand-edited.
 
 ## What's implemented vs. honestly deferred
 
