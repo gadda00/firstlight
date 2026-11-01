@@ -20,6 +20,10 @@ beforeAll(async () => {
   rmSync(DB_PATH, { force: true });
   const url = `file:${DB_PATH}`;
   process.env.DATABASE_URL = url;
+  // Reset the process-wide Prisma singleton BEFORE importing anything that
+  // binds it (ingestWindowFor's module chain reaches the router's db).
+  const { resetDbForTests } = await import('@/lib/server/db');
+  resetDbForTests();
   const { $ } = await import('bun');
   await $`bunx prisma db push --skip-generate --schema prisma/schema.prisma`.quiet();
   db = new PrismaClient({ datasourceUrl: url });
@@ -33,7 +37,7 @@ afterAll(async () => {
 
 async function seedOrgEvent() {
   const org = await db.organization.create({
-    data: { slug: `ident-org-${Date.now()}`, name: 'Identity Org' },
+    data: { slug: `ident-org-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, name: 'Identity Org' },
   });
   const user = await db.user.create({
     data: { orgId: org.id, email: `ident-${Date.now()}@t.test`, name: 'Ident Tester', role: 'analyst' },

@@ -19,6 +19,10 @@ beforeAll(async () => {
   rmSync(DB_PATH, { force: true });
   const url = `file:${DB_PATH}`;
   process.env.DATABASE_URL = url;
+  // The router/auth modules hold a process-wide Prisma singleton: reset it
+  // so THIS file's throwaway database is the one every dispatch uses.
+  const { resetDbForTests } = await import('@/lib/server/db');
+  resetDbForTests();
   // Push schema via programmatic prisma isn't available; we require the
   // caller (bun test) to have run `prisma db push` first. The helper below
   // shells out once.
@@ -37,7 +41,10 @@ afterAll(async () => {
 
 async function seedOrg() {
   return db.organization.create({
-    data: { slug: `test-org-${Date.now()}`, name: 'Test Org' },
+    data: {
+      slug: `test-org-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      name: 'Test Org',
+    },
   });
 }
 

@@ -9,7 +9,7 @@ The transformation brief's definition of done, itemized with evidence. **Status 
 | Frozen install reproducible | ✅ | `bun.lock` committed; CI installs `--frozen-lockfile` with **no fallback** (the old `\|\| bun install` is removed) |
 | Lint passes | ✅ | `bun run lint` → 0 errors (CI job) |
 | **Typecheck passes — no skipped validation** | ✅ | `tsc --noEmit` exit 0 (0 errors); `ignoreBuildErrors: false`; hard CI gate. Round-3 regression (182 errors incl. 7 adapters importing a non-existent `httpClient`) fully repaired in round 4 without loosening strictness |
-| Unit/integration/contract tests | ✅ | **184/184** across 15 files (geo, graph, decision, sitrep, exports, golden determinism, clip, scoring, integration, adapters, registry import coverage, planet contracts, ingestion identity/concurrency/lifecycle) + 24 Python egress-policy unit tests. Counts regenerate from `docs/verification-summary.json` (`bun run verify:full`) — never hand-edited |
+| Unit/integration/contract tests | ✅ | **186/186** across 15 files (geo, graph, decision, sitrep, exports, golden determinism, clip, scoring, integration, adapters, registry import coverage, planet contracts, ingestion identity/concurrency/lifecycle) + 24 Python egress-policy unit tests. Counts regenerate from `docs/verification-summary.json` (`bun run verify:full`) — never hand-edited |
 | Production build (operational) | ✅ | `bun run build` type-validated; API route dynamic |
 | Static demo build | ✅ | `bun run build:static`; API route excluded (never ships a server surface) |
 | Demo mode works offline, clearly labeled | ✅ | 52-check browser suite section B: SIMULATED banner renders, pipeline boots, H3 zones render, no console errors |

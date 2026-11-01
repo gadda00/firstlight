@@ -62,7 +62,7 @@ python3 scripts/browser-smoke.py          # 59 checks: login→ingest→review�
 ```bash
 bun run lint        # eslint — 0 errors
 bun run typecheck   # tsc --noEmit — HARD gate (ignoreBuildErrors removed in Phase 0)
-bun test            # 184 unit + integration + contract tests (round 4: +17 ingestion identity/concurrency, +6 registry import coverage, +2 layer provenance)
+bun test            # 186 unit + integration + contract tests (round 4: +19 ingestion identity/concurrency/window, +6 registry import coverage, +2 layer provenance)
 bun run build       # operational build (type-validated)
 bun run build:static  # demo build (API route excluded — a static build never ships a server)
 ```
