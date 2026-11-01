@@ -34,6 +34,7 @@ services:
       dockerfile: Dockerfile
       args:
         DB_PROVIDER: sqlite
+        APP_MODE: demo
     container_name: firstlight-demo
     restart: unless-stopped
     ports:
@@ -68,6 +69,7 @@ services:
       dockerfile: Dockerfile
       args:
         DB_PROVIDER: postgres
+        APP_MODE: operational
     container_name: firstlight-app
     restart: unless-stopped
     # NOT published directly — the nginx ingress is the only public surface.
@@ -112,6 +114,7 @@ services:
       dockerfile: Dockerfile
       args:
         DB_PROVIDER: postgres
+        APP_MODE: operational
     container_name: firstlight-migrate
     restart: "no"
     entrypoint:

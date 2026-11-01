@@ -139,6 +139,23 @@ export async function handleEventStatus(ctx: RequestContext): Promise<Response> 
   return ok({ event: updated }, ctx.requestId);
 }
 
+/** Ingestion request identity is hash-complete (aoi + timeWindow + country),
+ * so the DERIVED window must be STABLE across retries — a `to: now` that
+ * moves every call would make every retry a brand-new run. We quantize the
+ * upper bound down to the hour: retries inside the same hour replay the
+ * original run, and a genuinely different window still produces a new one.
+ * Exported for tests. */
+export function ingestWindowFor(ev: { incidentTime: Date }): {
+  from: string;
+  to: string;
+} {
+  const HOUR = 3_600_000;
+  return {
+    from: new Date(ev.incidentTime.getTime() - 7 * 86400_000).toISOString(),
+    to: new Date(Math.floor(Date.now() / HOUR) * HOUR).toISOString(),
+  };
+}
+
 export async function handleIngest(ctx: RequestContext): Promise<Response> {
   if (!ctx.auth) throw errors.unauthorized();
   const ev = await getOrgEvent(db, ctx.auth.user.orgId, routeParam(ctx, 'id'));
@@ -150,10 +167,7 @@ export async function handleIngest(ctx: RequestContext): Promise<Response> {
     adapterId: body.adapterId,
     params: body.params,
     aoi: { lat: ev.centerLat, lng: ev.centerLng, aoiKm: ev.aoiKm },
-    timeWindow: {
-      from: new Date(ev.incidentTime.getTime() - 7 * 86400_000).toISOString(),
-      to: new Date().toISOString(),
-    },
+    timeWindow: ingestWindowFor(ev),
     country: ev.country,
   });
   // Lifecycle: first successful ingest moves draft → ingesting.

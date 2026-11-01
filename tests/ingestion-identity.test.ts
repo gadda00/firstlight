@@ -234,6 +234,28 @@ describe('runIngestion — identity semantics against the catalog', () => {
   });
 });
 
+/* ------------------------------------------- handler window quantization */
+
+describe('ingestWindowFor — stable derived window (handler-level retries)', () => {
+  test('returns the SAME window for repeated calls within an hour', async () => {
+    const { ingestWindowFor } = await import('@/server/api/events');
+    const ev = { incidentTime: new Date('2025-06-16T12:00:00Z') };
+    const a = ingestWindowFor(ev);
+    const b = ingestWindowFor(ev);
+    expect(a).toEqual(b);
+    // Upper bound is quantized to the hour (stable, not wall-clock now).
+    expect(new Date(a.to).getUTCMinutes()).toBe(0);
+    expect(new Date(a.to).getUTCSeconds()).toBe(0);
+    expect(new Date(a.to).getUTCMilliseconds()).toBe(0);
+  });
+
+  test('from is anchored to the event, not the clock', async () => {
+    const { ingestWindowFor } = await import('@/server/api/events');
+    const { from } = ingestWindowFor({ incidentTime: new Date('2025-06-16T12:00:00Z') });
+    expect(from).toBe('2025-06-09T12:00:00.000Z');
+  });
+});
+
 /* ---------------------------------------------------------- concurrency */
 
 describe('runIngestion — concurrent duplicate requests', () => {

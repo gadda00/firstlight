@@ -31,6 +31,12 @@ RUN if [ "$DB_PROVIDER" = "postgres" ]; then \
       cp prisma/schema.postgres.prisma prisma/schema.prisma; \
     fi
 
+# NEXT_PUBLIC_* is INLINED AT BUILD TIME — a runtime env var cannot flip the
+# client bundle's mode. APP_MODE selects it per image: the demo image is a
+# demo, the pilot image is operational, and neither can mix.
+ARG APP_MODE=demo
+ENV NEXT_PUBLIC_DEMO_MODE=$APP_MODE
+
 # Generate Prisma client
 RUN bunx prisma generate
 
