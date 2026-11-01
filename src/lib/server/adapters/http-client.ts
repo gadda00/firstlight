@@ -182,6 +182,43 @@ export async function resilientFetch(url: string, opts: FetchOpts): Promise<Fetc
     : errors.upstream(`Provider unreachable after ${retries + 1} attempts`);
 }
 
+/**
+ * Timeout-bounded `fetch` factory for adapters that talk to providers with
+ * plain `Request`/`Response` semantics (e.g. POST-then-poll catalog APIs).
+ *
+ * The returned function is signature-compatible with `fetch` so it can be
+ * injected anywhere `AdapterDeps['fetchImpl']` is expected. It enforces the
+ * ONE cross-cutting rule that plain `fetch` misses — a hard abort deadline —
+ * while the caller keeps responsibility for status handling and body parsing.
+ *
+ * Note: this deliberately does NOT duplicate the retry/allowlist/size-bound
+ * logic of `resilientFetch`. Adapters that can should prefer `fetchJson` /
+ * `resilientFetch`; `httpClient` exists for request shapes those helpers do
+ * not cover (multipart POSTs, polling loops with caller-side control flow).
+ */
+export function httpClient(timeoutMs: number = DEFAULT_TIMEOUT_MS): typeof fetch {
+  const timed = (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    // Compose with a caller-supplied signal so both deadlines are honored.
+    const outer = init?.signal;
+    const onOuterAbort = () => controller.abort();
+    if (outer) {
+      if (outer.aborted) controller.abort();
+      else outer.addEventListener('abort', onOuterAbort, { once: true });
+    }
+    return fetch(input, { ...init, signal: controller.signal }).finally(() => {
+      clearTimeout(timer);
+      outer?.removeEventListener('abort', onOuterAbort);
+    });
+  };
+  // `typeof fetch` (bun-types) carries a `preconnect` member for connection
+  // warming; delegate it so this factory is a full drop-in for `fetch`.
+  return Object.assign(timed, {
+    preconnect: (url: string | URL): void => fetch.preconnect(url),
+  });
+}
+
 /** JSON convenience wrapper with parse validation. */
 export async function fetchJson<T>(url: string, opts: FetchOpts): Promise<{ data: T; fetched: Fetched }> {
   const fetched = await resilientFetch(url, {

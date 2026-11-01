@@ -15,7 +15,7 @@
  * - https://developer.twitter.com/en/docs/twitter-api/early-access
  * ========================================================================== */
 
-import type { DataSourceAdapter, DiscoveredAsset, DiscoveryRequest, ProcessingContext, NormalizedProduct, AdapterDeps } from '../types';
+import type { DataSourceAdapter, DiscoveredAsset, DiscoveryRequest, ProcessingContext, NormalizedProduct, AdapterDeps, AcquiredAsset, AcquireDestination, ValidationReport, GeoJSONGeometry } from '../types';
 import { requireEnv, validGeometry, aoiToBbox, BlockedDependencyError } from '../types';
 import { httpClient } from '../http-client';
 
@@ -49,6 +49,7 @@ function getConfig(deps?: AdapterDeps): TwitterConfig {
 /** Twitter data types */
 export type TwitterDataType = 
   | 'tweets'
+  | 'geo-tweets'
   | 'users'
   | 'spaces'
   | 'lists'
@@ -106,6 +107,19 @@ const TWITTER_LICENSE = {
 /**
  * Discover Twitter data for an AOI and time window
  */
+
+/** Narrow a Twitter v2 geo coordinate pair (unknown at the boundary) into the
+ * shared GeoJSON Point contract. Returns undefined when absent/malformed —
+ * never fabricates a coordinate. */
+function tweetGeoToGeometry(coords: unknown): GeoJSONGeometry | undefined {
+  if (!Array.isArray(coords) || coords.length !== 2) return undefined;
+  const [lng, lat] = coords as unknown[];
+  if (typeof lng !== 'number' || typeof lat !== 'number' || !Number.isFinite(lng) || !Number.isFinite(lat)) {
+    return undefined;
+  }
+  return { type: 'Point', coordinates: [lng, lat] };
+}
+
 async function discoverTwitter(
   req: DiscoveryRequest,
   config: TwitterConfig,
@@ -125,7 +139,7 @@ async function discoverTwitter(
     if (dataType === 'tweets' || dataType === 'geo-tweets') {
       // Search for tweets
       const query = params?.query || '';
-      const maxResults = params?.limit || assetType.maxResults;
+      const maxResults = typeof params?.limit === 'number' && params.limit > 0 ? params.limit : assetType.maxResults;
 
       // Build geo query if we have a bounding box
       let geoQuery = '';
@@ -174,10 +188,8 @@ async function discoverTwitter(
 
       // Create assets from tweets
       const assets: DiscoveredAsset[] = tweets.map((tweet: any) => {
-        const geometry = tweet.geo ? {
-          type: 'Point',
-          coordinates: tweet.geo.coordinates?.coordinates || [0, 0],
-        } : undefined;
+        // Twitter v2 `tweet.geo` is GeoJSON-shaped: { type: 'Point', coordinates: [lng, lat] }.
+        const geometry = tweetGeoToGeometry(tweet?.geo?.coordinates);
 
         const place = tweet.geo?.place_id ? data.includes?.places?.find((p: any) => p.id === tweet.geo.place_id) : null;
 
@@ -217,7 +229,7 @@ async function discoverTwitter(
     } else if (dataType === 'users') {
       // Search for users
       const query = params?.query || '';
-      const maxResults = params?.limit || assetType.maxResults;
+      const maxResults = typeof params?.limit === 'number' && params.limit > 0 ? params.limit : assetType.maxResults;
 
       const searchUrl = `${config.baseUrl}/users/by/username/${query}`;
 
@@ -250,7 +262,7 @@ async function discoverTwitter(
             following: user.public_metrics?.following_count || 0,
             tweets: user.public_metrics?.tweet_count || 0,
           },
-          geometry: validGeometry(aoi) ? aoi : undefined,
+          geometry: { type: 'Point' as const, coordinates: [aoi.lng, aoi.lat] },
           license: TWITTER_LICENSE,
           raw: {
             userId: user.id,
@@ -294,7 +306,7 @@ async function discoverTwitter(
           tweetVolume: trend.tweet_volume,
           rank: trend.rank,
         },
-        geometry: validGeometry(aoi) ? aoi : undefined,
+        geometry: { type: 'Point' as const, coordinates: [aoi.lng, aoi.lat] },
         license: TWITTER_LICENSE,
         raw: {
           trend: trend.name,
@@ -319,10 +331,10 @@ async function discoverTwitter(
  */
 async function acquireTwitter(
   asset: DiscoveredAsset,
-  dest: { mode: 'reference' | 'buffer'; maxBytes: number },
+  dest: AcquireDestination,
   config: TwitterConfig,
   deps?: AdapterDeps,
-): Promise<{ mode: 'reference' | 'buffer'; sizeBytes: number | null; sha256: string | null }> {
+): Promise<AcquiredAsset> {
   try {
     const fetchImpl = deps?.fetchImpl || httpClient(config.timeoutMs);
 
@@ -398,14 +410,14 @@ async function acquireTwitter(
 
     return {
       mode: dest.mode,
-      sizeBytes: null,
+      sizeBytes: 0,
       sha256: null,
     };
   } catch (error) {
     console.error('Twitter acquisition error:', error);
     return {
       mode: dest.mode,
-      sizeBytes: null,
+      sizeBytes: 0,
       sha256: null,
     };
   }
@@ -416,8 +428,8 @@ async function acquireTwitter(
  */
 async function validateTwitter(
   asset: DiscoveredAsset,
-  acquired: { mode: 'reference' | 'buffer'; sizeBytes: number | null; sha256: string | null },
-): Promise<{ ok: boolean; checks: Array<{ name: string; ok: boolean; detail?: string }> }> {
+  acquired: AcquiredAsset,
+): Promise<ValidationReport> {
   const checks = [
     {
       name: 'external_id_exists',
@@ -461,7 +473,7 @@ async function validateTwitter(
  */
 async function normalizeTwitter(
   asset: DiscoveredAsset,
-  acquired: { mode: 'reference' | 'buffer'; sizeBytes: number | null; sha256: string | null },
+  acquired: AcquiredAsset,
   ctx: ProcessingContext,
 ): Promise<NormalizedProduct[]> {
   const dataType = asset.assetType?.split('.').pop() || 'tweet';
@@ -477,7 +489,7 @@ async function normalizeTwitter(
       publishedAt: asset.publishedAt ? new Date(asset.publishedAt) : null,
       license: TWITTER_LICENSE.name,
       attribution: TWITTER_LICENSE.attribution,
-      url: asset.url,
+      url: asset.url ?? null,
       checksumSha256: acquired.sha256,
       sizeBytes: acquired.sizeBytes,
       quality: {
@@ -485,7 +497,7 @@ async function normalizeTwitter(
         provider: 'Twitter',
         dataType,
       },
-      geometry: asset.geometry,
+      geometry: asset.geometry ?? null,
       status: 'discovered',
       simulated: false,
     },
@@ -511,16 +523,16 @@ export const twitterAdapter: DataSourceAdapter = {
     return discoverTwitter(req, config, deps);
   },
 
-  async acquire(asset: DiscoveredAsset, dest: { mode: 'reference' | 'buffer'; maxBytes: number }, deps?: AdapterDeps): Promise<{ mode: 'reference' | 'buffer'; sizeBytes: number | null; sha256: string | null }> {
+  async acquire(asset: DiscoveredAsset, dest: AcquireDestination, deps?: AdapterDeps): Promise<AcquiredAsset> {
     const config = getConfig(deps);
     return acquireTwitter(asset, dest, config, deps);
   },
 
-  async validate(asset: DiscoveredAsset, acquired: { mode: 'reference' | 'buffer'; sizeBytes: number | null; sha256: string | null }): Promise<{ ok: boolean; checks: Array<{ name: string; ok: boolean; detail?: string }> }> {
+  async validate(asset: DiscoveredAsset, acquired: AcquiredAsset): Promise<ValidationReport> {
     return validateTwitter(asset, acquired);
   },
 
-  async normalize(asset: DiscoveredAsset, acquired: { mode: 'reference' | 'buffer'; sizeBytes: number | null; sha256: string | null }, ctx: ProcessingContext): Promise<NormalizedProduct[]> {
+  async normalize(asset: DiscoveredAsset, acquired: AcquiredAsset, ctx: ProcessingContext): Promise<NormalizedProduct[]> {
     return normalizeTwitter(asset, acquired, ctx);
   },
 };

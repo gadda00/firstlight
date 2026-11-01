@@ -129,8 +129,9 @@ export interface DataSourceAdapter {
   id: string;
   /** Human-readable provider label for the catalog. */
   label: string;
-  /** Data category (hazard feed, imagery catalog, exposure, roads, alert). */
-  kind: 'hazard' | 'imagery' | 'exposure' | 'roads' | 'alert' | 'synthetic';
+  /** Data category (hazard feed, imagery catalog, exposure, roads, alert,
+   *  weather reanalysis, OSINT/situational awareness, synthetic). */
+  kind: 'hazard' | 'imagery' | 'exposure' | 'roads' | 'alert' | 'weather' | 'osint' | 'synthetic';
   /** Honest readiness statement surfaced in /api/meta and DATA_SOURCES.md. */
   health: ProviderHealth;
   healthNote: string;
@@ -187,6 +188,18 @@ export function validGeometry(g: GeoJSONGeometry | undefined): boolean {
     );
   }
   return false;
+}
+
+/** True when v is a finite number in [0, 100] — quality metrics like
+ * cloud cover are Record<string, unknown> at the contract boundary, so every
+ * comparison must narrow before use. */
+export function isPercent(v: unknown): boolean {
+  return typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 100;
+}
+
+/** Narrow an unknown quality metric to a finite number (null otherwise). */
+export function asNumber(v: unknown): number | null {
+  return typeof v === 'number' && Number.isFinite(v) ? v : null;
 }
 
 /** A bounded AOI in degrees — used to build provider bbox parameters. */

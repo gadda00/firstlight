@@ -14,7 +14,7 @@
  * API Documentation: https://developers.digitalglobe.com/
  * ========================================================================== */
 
-import type { DataSourceAdapter, DiscoveredAsset, DiscoveryRequest, ProcessingContext, NormalizedProduct, AdapterDeps } from '../types';
+import type { AcquireDestination, AcquiredAsset, AdapterDeps, DataSourceAdapter, DiscoveredAsset, DiscoveryRequest, NormalizedProduct, ProcessingContext, ValidationReport } from '../types';
 import { requireEnv, validGeometry, aoiToBbox, BlockedDependencyError } from '../types';
 import { httpClient } from '../http-client';
 
@@ -257,10 +257,10 @@ async function discoverMaxar(
  */
 async function acquireMaxar(
   asset: DiscoveredAsset,
-  dest: { mode: 'reference' | 'buffer'; maxBytes: number },
+  dest: AcquireDestination,
   config: MaxarConfig,
   deps?: AdapterDeps,
-): Promise<{ mode: 'reference' | 'buffer'; sizeBytes: number | null; sha256: string | null }> {
+): Promise<AcquiredAsset> {
   const token = await getMaxarToken(config, deps);
   
   // Build download URL
@@ -294,7 +294,7 @@ async function acquireMaxar(
     if (dest.mode === 'reference') {
       return {
         mode: 'reference',
-        sizeBytes: orthoAsset.size || null,
+        sizeBytes: typeof orthoAsset.size === 'number' ? orthoAsset.size : 0,
         sha256: null,
       };
     }
@@ -303,14 +303,14 @@ async function acquireMaxar(
     // Note: Maxar typically provides download URLs that require authentication
     return {
       mode: 'reference',
-      sizeBytes: orthoAsset.size || null,
+      sizeBytes: typeof orthoAsset.size === 'number' ? orthoAsset.size : 0,
       sha256: null,
     };
   } catch (error) {
     console.error('Maxar acquisition error:', error);
     return {
       mode: dest.mode,
-      sizeBytes: null,
+      sizeBytes: 0,
       sha256: null,
     };
   }
@@ -321,8 +321,8 @@ async function acquireMaxar(
  */
 async function validateMaxar(
   asset: DiscoveredAsset,
-  acquired: { mode: 'reference' | 'buffer'; sizeBytes: number | null; sha256: string | null },
-): Promise<{ ok: boolean; checks: Array<{ name: string; ok: boolean; detail?: string }> }> {
+  acquired: AcquiredAsset,
+): Promise<ValidationReport> {
   const checks = [
     {
       name: 'external_id_exists',
@@ -351,7 +351,7 @@ async function validateMaxar(
     },
     {
       name: 'gsd_valid',
-      ok: !asset.quality?.groundSampleDistance || asset.quality.groundSampleDistance > 0,
+      ok: !asset.quality?.groundSampleDistance || (typeof asset.quality.groundSampleDistance === 'number' && asset.quality.groundSampleDistance > 0),
       detail: asset.quality?.groundSampleDistance ? undefined : 'Invalid GSD value',
     },
   ];
@@ -366,10 +366,10 @@ async function validateMaxar(
  */
 async function normalizeMaxar(
   asset: DiscoveredAsset,
-  acquired: { mode: 'reference' | 'buffer'; sizeBytes: number | null; sha256: string | null },
+  acquired: AcquiredAsset,
   ctx: ProcessingContext,
 ): Promise<NormalizedProduct[]> {
-  const satellite = asset.raw?.satellite || 'WorldView3';
+  const satellite = typeof asset.raw?.satellite === 'string' && asset.raw.satellite ? asset.raw.satellite : 'WorldView3';
   const assetType = MAXAR_ASSET_TYPES.find(t => t.satellite === satellite);
   
   return [
@@ -383,7 +383,7 @@ async function normalizeMaxar(
       publishedAt: asset.publishedAt ? new Date(asset.publishedAt) : null,
       license: MAXAR_LICENSE.name,
       attribution: MAXAR_LICENSE.attribution,
-      url: asset.url,
+      url: asset.url ?? null,
       checksumSha256: acquired.sha256,
       sizeBytes: acquired.sizeBytes,
       quality: {
@@ -393,7 +393,7 @@ async function normalizeMaxar(
         resolution: assetType?.resolution || 'unknown',
         bands: assetType?.bands || [],
       },
-      geometry: asset.geometry,
+      geometry: asset.geometry ?? null,
       status: 'discovered',
       simulated: false,
     },
@@ -419,16 +419,16 @@ export const maxarAdapter: DataSourceAdapter = {
     return discoverMaxar(req, config, deps);
   },
   
-  async acquire(asset: DiscoveredAsset, dest: { mode: 'reference' | 'buffer'; maxBytes: number }, deps?: AdapterDeps): Promise<{ mode: 'reference' | 'buffer'; sizeBytes: number | null; sha256: string | null }> {
+  async acquire(asset: DiscoveredAsset, dest: AcquireDestination, deps?: AdapterDeps): Promise<AcquiredAsset> {
     const config = getConfig(deps);
     return acquireMaxar(asset, dest, config, deps);
   },
   
-  async validate(asset: DiscoveredAsset, acquired: { mode: 'reference' | 'buffer'; sizeBytes: number | null; sha256: string | null }): Promise<{ ok: boolean; checks: Array<{ name: string; ok: boolean; detail?: string }> }> {
+  async validate(asset: DiscoveredAsset, acquired: AcquiredAsset): Promise<ValidationReport> {
     return validateMaxar(asset, acquired);
   },
   
-  async normalize(asset: DiscoveredAsset, acquired: { mode: 'reference' | 'buffer'; sizeBytes: number | null; sha256: string | null }, ctx: ProcessingContext): Promise<NormalizedProduct[]> {
+  async normalize(asset: DiscoveredAsset, acquired: AcquiredAsset, ctx: ProcessingContext): Promise<NormalizedProduct[]> {
     return normalizeMaxar(asset, acquired, ctx);
   },
 };

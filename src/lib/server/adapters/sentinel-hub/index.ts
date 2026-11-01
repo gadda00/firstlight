@@ -16,8 +16,8 @@
  * API Documentation: https://docs.sentinel-hub.com/api/latest/
  * ========================================================================== */
 
-import type { DataSourceAdapter, DiscoveredAsset, DiscoveryRequest, ProcessingContext, NormalizedProduct, AdapterDeps } from '../types';
-import { requireEnv, validGeometry, aoiToBbox, BlockedDependencyError } from '../types';
+import type { AcquireDestination, AcquiredAsset, AdapterDeps, DataSourceAdapter, DiscoveredAsset, DiscoveryRequest, NormalizedProduct, ProcessingContext, ValidationReport } from '../types';
+import { requireEnv, validGeometry, aoiToBbox, BlockedDependencyError, isPercent } from '../types';
 import { httpClient } from '../http-client';
 
 export interface SentinelHubConfig {
@@ -245,12 +245,14 @@ async function discoverSentinelHub(
  */
 async function acquireSentinelHub(
   asset: DiscoveredAsset,
-  dest: { mode: 'reference' | 'buffer'; maxBytes: number },
+  dest: AcquireDestination,
   config: SentinelHubConfig,
   deps?: AdapterDeps,
-): Promise<{ mode: 'reference' | 'buffer'; sizeBytes: number | null; sha256: string | null }> {
+): Promise<AcquiredAsset> {
   const token = await getSentinelHubToken(config, deps);
-  const collection = asset.raw?.collection || 'sentinel-2-l2a';
+  // Narrow the raw collection id to a known collection before use.
+  const rawCollection: unknown = asset.raw?.collection;
+  const collection = isSentinelHubCollection(rawCollection) ? rawCollection : 'sentinel-2-l2a';
   
   // Build processing request
   const processUrl = `${config.baseUrl}/api/v1/process`;
@@ -280,7 +282,7 @@ async function acquireSentinelHub(
   if (!bbox || bbox.length === 0) {
     return {
       mode: dest.mode,
-      sizeBytes: null,
+      sizeBytes: 0,
       sha256: null,
     };
   }
@@ -342,7 +344,7 @@ async function acquireSentinelHub(
     if (dest.mode === 'reference') {
       return {
         mode: 'reference',
-        sizeBytes: null,
+        sizeBytes: 0,
         sha256: null,
       };
     }
@@ -351,14 +353,14 @@ async function acquireSentinelHub(
     // This is typically done via the response URL in the data
     return {
       mode: 'reference',
-      sizeBytes: null,
+      sizeBytes: 0,
       sha256: null,
     };
   } catch (error) {
     console.error('Sentinel Hub acquisition error:', error);
     return {
       mode: dest.mode,
-      sizeBytes: null,
+      sizeBytes: 0,
       sha256: null,
     };
   }
@@ -367,6 +369,11 @@ async function acquireSentinelHub(
 /**
  * Get bands for a collection
  */
+/** Type guard: only collections we explicitly support are accepted. */
+function isSentinelHubCollection(v: unknown): v is SentinelHubCollection {
+  return typeof v === 'string' && SENTINELHUB_ASSET_TYPES.some(t => t.collection === v);
+}
+
 function getBandsForCollection(collection: SentinelHubCollection): string[] {
   const assetType = SENTINELHUB_ASSET_TYPES.find(t => t.collection === collection);
   return assetType?.bands || ['B01', 'B02', 'B03', 'B04'];
@@ -377,8 +384,8 @@ function getBandsForCollection(collection: SentinelHubCollection): string[] {
  */
 async function validateSentinelHub(
   asset: DiscoveredAsset,
-  acquired: { mode: 'reference' | 'buffer'; sizeBytes: number | null; sha256: string | null },
-): Promise<{ ok: boolean; checks: Array<{ name: string; ok: boolean; detail?: string }> }> {
+  acquired: AcquiredAsset,
+): Promise<ValidationReport> {
   const checks = [
     {
       name: 'external_id_exists',
@@ -402,12 +409,12 @@ async function validateSentinelHub(
     },
     {
       name: 'collection_valid',
-      ok: !!asset.raw?.collection && SENTINELHUB_ASSET_TYPES.some(t => t.collection === asset.raw.collection),
+      ok: isSentinelHubCollection(asset.raw?.collection),
       detail: asset.raw?.collection ? undefined : 'Invalid collection',
     },
     {
       name: 'cloud_cover_valid',
-      ok: !asset.quality?.cloudCover || (asset.quality.cloudCover >= 0 && asset.quality.cloudCover <= 100),
+      ok: !asset.quality?.cloudCover || isPercent(asset.quality.cloudCover),
       detail: asset.quality?.cloudCover ? undefined : 'Invalid cloud cover value',
     },
   ];
@@ -422,7 +429,7 @@ async function validateSentinelHub(
  */
 async function normalizeSentinelHub(
   asset: DiscoveredAsset,
-  acquired: { mode: 'reference' | 'buffer'; sizeBytes: number | null; sha256: string | null },
+  acquired: AcquiredAsset,
   ctx: ProcessingContext,
 ): Promise<NormalizedProduct[]> {
   const collection = asset.raw?.collection || 'sentinel-2-l2a';
@@ -439,7 +446,7 @@ async function normalizeSentinelHub(
       publishedAt: asset.publishedAt ? new Date(asset.publishedAt) : null,
       license: SENTINELHUB_LICENSE.name,
       attribution: SENTINELHUB_LICENSE.attribution,
-      url: asset.url,
+      url: asset.url ?? null,
       checksumSha256: acquired.sha256,
       sizeBytes: acquired.sizeBytes,
       quality: {
@@ -450,7 +457,7 @@ async function normalizeSentinelHub(
         resolution: assetType?.resolution || 'unknown',
         bands: assetType?.bands || [],
       },
-      geometry: asset.geometry,
+      geometry: asset.geometry ?? null,
       status: 'discovered',
       simulated: false,
     },
@@ -476,16 +483,16 @@ export const sentinelHubAdapter: DataSourceAdapter = {
     return discoverSentinelHub(req, config, deps);
   },
   
-  async acquire(asset: DiscoveredAsset, dest: { mode: 'reference' | 'buffer'; maxBytes: number }, deps?: AdapterDeps): Promise<{ mode: 'reference' | 'buffer'; sizeBytes: number | null; sha256: string | null }> {
+  async acquire(asset: DiscoveredAsset, dest: AcquireDestination, deps?: AdapterDeps): Promise<AcquiredAsset> {
     const config = getConfig(deps);
     return acquireSentinelHub(asset, dest, config, deps);
   },
   
-  async validate(asset: DiscoveredAsset, acquired: { mode: 'reference' | 'buffer'; sizeBytes: number | null; sha256: string | null }): Promise<{ ok: boolean; checks: Array<{ name: string; ok: boolean; detail?: string }> }> {
+  async validate(asset: DiscoveredAsset, acquired: AcquiredAsset): Promise<ValidationReport> {
     return validateSentinelHub(asset, acquired);
   },
   
-  async normalize(asset: DiscoveredAsset, acquired: { mode: 'reference' | 'buffer'; sizeBytes: number | null; sha256: string | null }, ctx: ProcessingContext): Promise<NormalizedProduct[]> {
+  async normalize(asset: DiscoveredAsset, acquired: AcquiredAsset, ctx: ProcessingContext): Promise<NormalizedProduct[]> {
     return normalizeSentinelHub(asset, acquired, ctx);
   },
 };

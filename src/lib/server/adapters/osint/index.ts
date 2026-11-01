@@ -17,7 +17,7 @@
  * - Various OSINT APIs and data sources
  * ========================================================================== */
 
-import type { DataSourceAdapter, DiscoveredAsset, DiscoveryRequest, ProcessingContext, NormalizedProduct, AdapterDeps } from '../types';
+import type { AcquireDestination, AcquiredAsset, AdapterDeps, DataSourceAdapter, DiscoveredAsset, DiscoveryRequest, NormalizedProduct, ProcessingContext, ValidationReport } from '../types';
 import { validGeometry, aoiToBbox, BlockedDependencyError } from '../types';
 import { httpClient } from '../http-client';
 import { ADAPTERS } from '../registry';
@@ -153,37 +153,37 @@ async function discoverOSINT(
   try {
     // Query other adapters for OSINT data
     if (dataType === 'all' || dataType === 'news') {
-      const newsAssets = await this.queryNewsAPI(req, config, deps);
+      const newsAssets = await queryNewsAPI(req, config, deps);
       assets.push(...newsAssets);
     }
 
     if (dataType === 'all' || dataType === 'social-media') {
-      const socialAssets = await this.querySocialMedia(req, config, deps);
+      const socialAssets = await querySocialMedia(req, config, deps);
       assets.push(...socialAssets);
     }
 
     if (dataType === 'all' || dataType === 'public-records') {
-      const publicAssets = await this.queryPublicRecords(req, config, deps);
+      const publicAssets = await queryPublicRecords(req, config, deps);
       assets.push(...publicAssets);
     }
 
     if (dataType === 'all' || dataType === 'academic') {
-      const academicAssets = await this.queryAcademic(req, config, deps);
+      const academicAssets = await queryAcademic(req, config, deps);
       assets.push(...academicAssets);
     }
 
     if (dataType === 'all' || dataType === 'government') {
-      const governmentAssets = await this.queryGovernment(req, config, deps);
+      const governmentAssets = await queryGovernment(req, config, deps);
       assets.push(...governmentAssets);
     }
 
     if (dataType === 'all' || dataType === 'satellite-metadata') {
-      const satelliteAssets = await this.querySatelliteMetadata(req, config, deps);
+      const satelliteAssets = await querySatelliteMetadata(req, config, deps);
       assets.push(...satelliteAssets);
     }
 
     if (dataType === 'all' || dataType === 'weather') {
-      const weatherAssets = await this.queryWeather(req, config, deps);
+      const weatherAssets = await queryWeather(req, config, deps);
       assets.push(...weatherAssets);
     }
 
@@ -209,8 +209,10 @@ async function queryNewsAPI(
   const bbox = aoiToBbox(aoi);
 
   // Use location name if available
-  const location = params?.location || this.getLocationName(bbox);
-  const query = params?.query || location || 'disaster emergency crisis';
+  const rawLocation = params?.location;
+  const location = typeof rawLocation === 'string' && rawLocation ? rawLocation : getLocationName(bbox);
+  const rawQuery = params?.query;
+  const query = typeof rawQuery === 'string' && rawQuery ? rawQuery : (location || 'disaster emergency crisis');
 
   const startDate = timeWindow.from || new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
   const endDate = timeWindow.to || new Date().toISOString();
@@ -238,7 +240,7 @@ async function queryNewsAPI(
             source: article.source?.name,
             relevance: article.score || 0,
           },
-          geometry: validGeometry(aoi) ? aoi : undefined,
+          geometry: { type: 'Point' as const, coordinates: [aoi.lng, aoi.lat] },
           license: OSINT_LICENSE,
           raw: {
             source: article.source?.name,
@@ -308,7 +310,7 @@ async function queryPublicRecords(
       source: 'Government Database',
       type: 'Property Records',
     },
-    geometry: validGeometry(aoi) ? aoi : undefined,
+    geometry: { type: 'Point' as const, coordinates: [aoi.lng, aoi.lat] },
     license: OSINT_LICENSE,
     raw: {
       query: `Location: ${bbox.west},${bbox.south},${bbox.east},${bbox.north}`,
@@ -328,7 +330,8 @@ async function queryAcademic(
   const { aoi, timeWindow, params } = req;
   const bbox = aoiToBbox(aoi);
 
-  const query = params?.query || this.getLocationName(bbox) || 'disaster';
+  const rawQuery = params?.query;
+  const query = typeof rawQuery === 'string' && rawQuery ? rawQuery : (getLocationName(bbox) || 'disaster');
   const startDate = timeWindow.from || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
   const endDate = timeWindow.to || new Date().toISOString();
 
@@ -342,7 +345,7 @@ async function queryAcademic(
     if (response.ok) {
       const text = await response.text();
       // Parse XML response (simplified)
-      const entries = this.parseArXivResponse(text);
+      const entries = parseArXivResponse(text);
 
       return entries.map((entry: any) => ({
         externalId: entry.id,
@@ -356,7 +359,7 @@ async function queryAcademic(
           authors: entry.authors?.join(', ') || 'Unknown',
           category: entry.category,
         },
-        geometry: validGeometry(aoi) ? aoi : undefined,
+        geometry: { type: 'Point' as const, coordinates: [aoi.lng, aoi.lat] },
         license: OSINT_LICENSE,
         raw: {
           summary: entry.summary,
@@ -424,7 +427,7 @@ async function queryGovernment(
         source: 'NOAA',
         type: 'Weather Report',
       },
-      geometry: validGeometry(aoi) ? aoi : undefined,
+      geometry: { type: 'Point' as const, coordinates: [aoi.lng, aoi.lat] },
       license: OSINT_LICENSE,
       raw: {
         location: `${bbox.west},${bbox.south},${bbox.east},${bbox.north}`,
@@ -441,7 +444,7 @@ async function queryGovernment(
         source: 'FEMA',
         type: 'Disaster Declaration',
       },
-      geometry: validGeometry(aoi) ? aoi : undefined,
+      geometry: { type: 'Point' as const, coordinates: [aoi.lng, aoi.lat] },
       license: OSINT_LICENSE,
       raw: {
         location: `${bbox.west},${bbox.south},${bbox.east},${bbox.north}`,
@@ -523,10 +526,10 @@ function getLocationName(bbox: { west: number; south: number; east: number; nort
  */
 async function acquireOSINT(
   asset: DiscoveredAsset,
-  dest: { mode: 'reference' | 'buffer'; maxBytes: number },
+  dest: AcquireDestination,
   config: OSINTConfig,
   deps?: AdapterDeps,
-): Promise<{ mode: 'reference' | 'buffer'; sizeBytes: number | null; sha256: string | null }> {
+): Promise<AcquiredAsset> {
   try {
     const fetchImpl = deps?.fetchImpl || httpClient(config.timeoutMs);
 
@@ -563,14 +566,14 @@ async function acquireOSINT(
 
     return {
       mode: dest.mode,
-      sizeBytes: null,
+      sizeBytes: 0,
       sha256: null,
     };
   } catch (error) {
     console.error('OSINT acquisition error:', error);
     return {
       mode: dest.mode,
-      sizeBytes: null,
+      sizeBytes: 0,
       sha256: null,
     };
   }
@@ -581,8 +584,8 @@ async function acquireOSINT(
  */
 async function validateOSINT(
   asset: DiscoveredAsset,
-  acquired: { mode: 'reference' | 'buffer'; sizeBytes: number | null; sha256: string | null },
-): Promise<{ ok: boolean; checks: Array<{ name: string; ok: boolean; detail?: string }> }> {
+  acquired: AcquiredAsset,
+): Promise<ValidationReport> {
   const checks = [
     {
       name: 'external_id_exists',
@@ -621,7 +624,7 @@ async function validateOSINT(
  */
 async function normalizeOSINT(
   asset: DiscoveredAsset,
-  acquired: { mode: 'reference' | 'buffer'; sizeBytes: number | null; sha256: string | null },
+  acquired: AcquiredAsset,
   ctx: ProcessingContext,
 ): Promise<NormalizedProduct[]> {
   const dataType = asset.assetType?.split('.')[2] || 'unknown';
@@ -637,7 +640,7 @@ async function normalizeOSINT(
       publishedAt: asset.publishedAt ? new Date(asset.publishedAt) : null,
       license: OSINT_LICENSE.name,
       attribution: OSINT_LICENSE.attribution,
-      url: asset.url,
+      url: asset.url ?? null,
       checksumSha256: acquired.sha256,
       sizeBytes: acquired.sizeBytes,
       quality: {
@@ -646,7 +649,7 @@ async function normalizeOSINT(
         dataType,
         source: asset.raw?.source || 'Unknown',
       },
-      geometry: asset.geometry,
+      geometry: asset.geometry ?? null,
       status: 'discovered',
       simulated: false,
     },
@@ -672,16 +675,16 @@ export const osintAdapter: DataSourceAdapter = {
     return discoverOSINT(req, config, deps);
   },
 
-  async acquire(asset: DiscoveredAsset, dest: { mode: 'reference' | 'buffer'; maxBytes: number }, deps?: AdapterDeps): Promise<{ mode: 'reference' | 'buffer'; sizeBytes: number | null; sha256: string | null }> {
+  async acquire(asset: DiscoveredAsset, dest: AcquireDestination, deps?: AdapterDeps): Promise<AcquiredAsset> {
     const config = getConfig(deps);
     return acquireOSINT(asset, dest, config, deps);
   },
 
-  async validate(asset: DiscoveredAsset, acquired: { mode: 'reference' | 'buffer'; sizeBytes: number | null; sha256: string | null }): Promise<{ ok: boolean; checks: Array<{ name: string; ok: boolean; detail?: string }> }> {
+  async validate(asset: DiscoveredAsset, acquired: AcquiredAsset): Promise<ValidationReport> {
     return validateOSINT(asset, acquired);
   },
 
-  async normalize(asset: DiscoveredAsset, acquired: { mode: 'reference' | 'buffer'; sizeBytes: number | null; sha256: string | null }, ctx: ProcessingContext): Promise<NormalizedProduct[]> {
+  async normalize(asset: DiscoveredAsset, acquired: AcquiredAsset, ctx: ProcessingContext): Promise<NormalizedProduct[]> {
     return normalizeOSINT(asset, acquired, ctx);
   },
 };

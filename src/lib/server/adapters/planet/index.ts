@@ -12,8 +12,8 @@
  * API Documentation: https://developers.planet.com/docs/api/
  * ========================================================================== */
 
-import type { DataSourceAdapter, DiscoveredAsset, DiscoveryRequest, ProcessingContext, NormalizedProduct, AdapterDeps } from '../types';
-import { requireEnv, validGeometry, aoiToBbox, BlockedDependencyError } from '../types';
+import type { AcquireDestination, AcquiredAsset, AdapterDeps, DataSourceAdapter, DiscoveredAsset, DiscoveryRequest, NormalizedProduct, ProcessingContext, ValidationReport } from '../types';
+import { requireEnv, validGeometry, aoiToBbox, BlockedDependencyError, isPercent } from '../types';
 import { httpClient } from '../http-client';
 
 export interface PlanetConfig {
@@ -193,10 +193,10 @@ async function discoverPlanet(
  */
 async function acquirePlanet(
   asset: DiscoveredAsset,
-  dest: { mode: 'reference' | 'buffer'; maxBytes: number },
+  dest: AcquireDestination,
   config: PlanetConfig,
   deps?: AdapterDeps,
-): Promise<{ mode: 'reference' | 'buffer'; sizeBytes: number | null; sha256: string | null }> {
+): Promise<AcquiredAsset> {
   // Get activation URL for the asset
   const activationUrl = `${config.baseUrl}/data/v4/item-types/${asset.raw?.itemType || 'PSScene'}/${asset.externalId}/activate`;
   
@@ -262,7 +262,7 @@ async function acquirePlanet(
     if (dest.mode === 'reference') {
       return {
         mode: 'reference',
-        sizeBytes: null,
+        sizeBytes: 0,
         sha256: null,
       };
     }
@@ -290,7 +290,7 @@ async function acquirePlanet(
     console.error('Planet acquisition error:', error);
     return {
       mode: dest.mode,
-      sizeBytes: null,
+      sizeBytes: 0,
       sha256: null,
     };
   }
@@ -301,8 +301,8 @@ async function acquirePlanet(
  */
 async function validatePlanet(
   asset: DiscoveredAsset,
-  acquired: { mode: 'reference' | 'buffer'; sizeBytes: number | null; sha256: string | null },
-): Promise<{ ok: boolean; checks: Array<{ name: string; ok: boolean; detail?: string }> }> {
+  acquired: AcquiredAsset,
+): Promise<ValidationReport> {
   const checks = [
     {
       name: 'external_id_exists',
@@ -331,7 +331,7 @@ async function validatePlanet(
     },
     {
       name: 'cloud_cover_valid',
-      ok: !asset.quality?.cloudCover || (asset.quality.cloudCover >= 0 && asset.quality.cloudCover <= 100),
+      ok: !asset.quality?.cloudCover || isPercent(asset.quality.cloudCover),
       detail: asset.quality?.cloudCover ? undefined : 'Invalid cloud cover value',
     },
   ];
@@ -346,10 +346,10 @@ async function validatePlanet(
  */
 async function normalizePlanet(
   asset: DiscoveredAsset,
-  acquired: { mode: 'reference' | 'buffer'; sizeBytes: number | null; sha256: string | null },
+  acquired: AcquiredAsset,
   ctx: ProcessingContext,
 ): Promise<NormalizedProduct[]> {
-  const itemType = asset.raw?.itemType || 'PSScene';
+  const itemType = typeof asset.raw?.itemType === 'string' && asset.raw.itemType ? asset.raw.itemType : 'PSScene';
   
   return [
     {
@@ -362,7 +362,7 @@ async function normalizePlanet(
       publishedAt: asset.publishedAt ? new Date(asset.publishedAt) : null,
       license: PLANET_LICENSE.name,
       attribution: PLANET_LICENSE.attribution,
-      url: asset.url,
+      url: asset.url ?? null,
       checksumSha256: acquired.sha256,
       sizeBytes: acquired.sizeBytes,
       quality: {
@@ -372,7 +372,7 @@ async function normalizePlanet(
         resolution: PLANET_ASSET_TYPES.find(t => t.itemType === itemType)?.resolution || 'unknown',
         bands: PLANET_ASSET_TYPES.find(t => t.itemType === itemType)?.bands || [],
       },
-      geometry: asset.geometry,
+      geometry: asset.geometry ?? null,
       status: 'discovered',
       simulated: false,
     },
@@ -398,16 +398,16 @@ export const planetAdapter: DataSourceAdapter = {
     return discoverPlanet(req, config, deps);
   },
   
-  async acquire(asset: DiscoveredAsset, dest: { mode: 'reference' | 'buffer'; maxBytes: number }, deps?: AdapterDeps): Promise<{ mode: 'reference' | 'buffer'; sizeBytes: number | null; sha256: string | null }> {
+  async acquire(asset: DiscoveredAsset, dest: AcquireDestination, deps?: AdapterDeps): Promise<AcquiredAsset> {
     const config = getConfig(deps);
     return acquirePlanet(asset, dest, config, deps);
   },
   
-  async validate(asset: DiscoveredAsset, acquired: { mode: 'reference' | 'buffer'; sizeBytes: number | null; sha256: string | null }): Promise<{ ok: boolean; checks: Array<{ name: string; ok: boolean; detail?: string }> }> {
+  async validate(asset: DiscoveredAsset, acquired: AcquiredAsset): Promise<ValidationReport> {
     return validatePlanet(asset, acquired);
   },
   
-  async normalize(asset: DiscoveredAsset, acquired: { mode: 'reference' | 'buffer'; sizeBytes: number | null; sha256: string | null }, ctx: ProcessingContext): Promise<NormalizedProduct[]> {
+  async normalize(asset: DiscoveredAsset, acquired: AcquiredAsset, ctx: ProcessingContext): Promise<NormalizedProduct[]> {
     return normalizePlanet(asset, acquired, ctx);
   },
 };

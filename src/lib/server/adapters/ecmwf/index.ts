@@ -16,7 +16,7 @@
  * - https://cds.climate.copernicus.eu/
  * ========================================================================== */
 
-import type { DataSourceAdapter, DiscoveredAsset, DiscoveryRequest, ProcessingContext, NormalizedProduct, AdapterDeps } from '../types';
+import type { AcquireDestination, AcquiredAsset, AdapterDeps, DataSourceAdapter, DiscoveredAsset, DiscoveryRequest, NormalizedProduct, ProcessingContext, ValidationReport, GeoJSONGeometry } from '../types';
 import { requireEnv, validGeometry, aoiToBbox, BlockedDependencyError } from '../types';
 import { httpClient } from '../http-client';
 
@@ -150,11 +150,11 @@ async function discoverECMWF(
     expver: '1',
     class: 'ea',
     type: dataType === 'era5' ? 'an' : undefined,
-    param: this.getParametersForDataType(dataType),
+    param: getParametersForDataType(dataType),
     levtype: 'sfc',
     levelist: 'surface',
-    date: this.formatDateRange(startDate, endDate),
-    time: this.getTimeList(dataType),
+    date: formatDateRange(startDate, endDate),
+    time: getTimeList(dataType),
     step: '0',
     area: [bbox.north, bbox.west, bbox.south, bbox.east],
     grid: [assetType.resolution.includes('km') ? '0.25/0.25' : '1.0/1.0'],
@@ -187,11 +187,11 @@ async function discoverECMWF(
     // For CDS, we typically get a request ID that we need to poll
     if (data.request_id) {
       // Poll for results
-      const result = await this.pollCDSRequest(config, data.request_id, deps);
+      const result = await pollCDSRequest(config, data.request_id, deps);
       
       if (result.state === 'completed') {
         // Create assets from the result
-        const asset = this.createAssetFromCDSResult(result, assetType, aoi);
+        const asset = createAssetFromCDSResult(result, assetType, aoi);
         assets.push(asset);
       }
     }
@@ -248,8 +248,20 @@ async function pollCDSRequest(
 function createAssetFromCDSResult(
   result: any,
   assetType: ECMWFAssetType,
-  aoi: GeoJSON.Polygon | GeoJSON.MultiPolygon,
+  aoi: DiscoveryRequest['aoi'],
 ): DiscoveredAsset {
+  // AOI center + radius -> a rectangular polygon footprint (closed ring).
+  const box = aoiToBbox(aoi);
+  const aoiPolygon: GeoJSONGeometry = {
+    type: 'Polygon',
+    coordinates: [[
+      [box.west, box.south],
+      [box.east, box.south],
+      [box.east, box.north],
+      [box.west, box.north],
+      [box.west, box.south],
+    ]],
+  };
   return {
     externalId: result.request_id,
     title: `ECMWF ${assetType.label} Data`,
@@ -262,7 +274,7 @@ function createAssetFromCDSResult(
       temporalResolution: assetType.temporalResolution,
       provider: 'ECMWF',
     },
-    geometry: validGeometry(aoi) ? aoi : undefined,
+    geometry: aoiPolygon,
     license: ECMWF_LICENSE,
     raw: {
       dataType: assetType.dataType,
@@ -337,10 +349,10 @@ function formatDateRange(start: string, end: string): string {
  */
 async function acquireECMWF(
   asset: DiscoveredAsset,
-  dest: { mode: 'reference' | 'buffer'; maxBytes: number },
+  dest: AcquireDestination,
   config: ECMWFConfig,
   deps?: AdapterDeps,
-): Promise<{ mode: 'reference' | 'buffer'; sizeBytes: number | null; sha256: string | null }> {
+): Promise<AcquiredAsset> {
   try {
     const fetchImpl = deps?.fetchImpl || httpClient(config.timeoutMs);
     
@@ -349,7 +361,7 @@ async function acquireECMWF(
       if (dest.mode === 'reference') {
         return {
           mode: 'reference',
-          sizeBytes: null,
+          sizeBytes: 0,
           sha256: null,
         };
       }
@@ -387,14 +399,14 @@ async function acquireECMWF(
     // If no URL, return reference mode
     return {
       mode: 'reference',
-      sizeBytes: null,
+      sizeBytes: 0,
       sha256: null,
     };
   } catch (error) {
     console.error('ECMWF acquisition error:', error);
     return {
       mode: dest.mode,
-      sizeBytes: null,
+      sizeBytes: 0,
       sha256: null,
     };
   }
@@ -405,8 +417,8 @@ async function acquireECMWF(
  */
 async function validateECMWF(
   asset: DiscoveredAsset,
-  acquired: { mode: 'reference' | 'buffer'; sizeBytes: number | null; sha256: string | null },
-): Promise<{ ok: boolean; checks: Array<{ name: string; ok: boolean; detail?: string }> }> {
+  acquired: AcquiredAsset,
+): Promise<ValidationReport> {
   const checks = [
     {
       name: 'external_id_exists',
@@ -430,7 +442,7 @@ async function validateECMWF(
     },
     {
       name: 'data_type_valid',
-      ok: !!asset.raw?.dataType && ECMWF_ASSET_TYPES.some(t => t.dataType === asset.raw.dataType),
+      ok: typeof asset.raw?.dataType === 'string' && ECMWF_ASSET_TYPES.some(t => t.dataType === asset.raw?.dataType),
       detail: asset.raw?.dataType ? undefined : 'Invalid data type',
     },
     {
@@ -450,7 +462,7 @@ async function validateECMWF(
  */
 async function normalizeECMWF(
   asset: DiscoveredAsset,
-  acquired: { mode: 'reference' | 'buffer'; sizeBytes: number | null; sha256: string | null },
+  acquired: AcquiredAsset,
   ctx: ProcessingContext,
 ): Promise<NormalizedProduct[]> {
   const dataType = asset.raw?.dataType || 'era5';
@@ -467,7 +479,7 @@ async function normalizeECMWF(
       publishedAt: asset.publishedAt ? new Date(asset.publishedAt) : null,
       license: ECMWF_LICENSE.name,
       attribution: ECMWF_LICENSE.attribution,
-      url: asset.url,
+      url: asset.url ?? null,
       checksumSha256: acquired.sha256,
       sizeBytes: acquired.sizeBytes,
       quality: {
@@ -479,7 +491,7 @@ async function normalizeECMWF(
         temporalResolution: assetType.temporalResolution,
         parameters: assetType.parameters,
       },
-      geometry: asset.geometry,
+      geometry: asset.geometry ?? null,
       status: 'discovered',
       simulated: false,
     },
@@ -505,16 +517,16 @@ export const ecmwfAdapter: DataSourceAdapter = {
     return discoverECMWF(req, config, deps);
   },
 
-  async acquire(asset: DiscoveredAsset, dest: { mode: 'reference' | 'buffer'; maxBytes: number }, deps?: AdapterDeps): Promise<{ mode: 'reference' | 'buffer'; sizeBytes: number | null; sha256: string | null }> {
+  async acquire(asset: DiscoveredAsset, dest: AcquireDestination, deps?: AdapterDeps): Promise<AcquiredAsset> {
     const config = getConfig(deps);
     return acquireECMWF(asset, dest, config, deps);
   },
 
-  async validate(asset: DiscoveredAsset, acquired: { mode: 'reference' | 'buffer'; sizeBytes: number | null; sha256: string | null }): Promise<{ ok: boolean; checks: Array<{ name: string; ok: boolean; detail?: string }> }> {
+  async validate(asset: DiscoveredAsset, acquired: AcquiredAsset): Promise<ValidationReport> {
     return validateECMWF(asset, acquired);
   },
 
-  async normalize(asset: DiscoveredAsset, acquired: { mode: 'reference' | 'buffer'; sizeBytes: number | null; sha256: string | null }, ctx: ProcessingContext): Promise<NormalizedProduct[]> {
+  async normalize(asset: DiscoveredAsset, acquired: AcquiredAsset, ctx: ProcessingContext): Promise<NormalizedProduct[]> {
     return normalizeECMWF(asset, acquired, ctx);
   },
 };
