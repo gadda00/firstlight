@@ -157,8 +157,10 @@ model IngestionRun {
   eventId        String
   event          IncidentEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
   adapterId      String
-  /// eventId:adapterId:params-digest — re-running the same request replays
-  /// the original run instead of duplicating work.
+  /// sha256 over the CANONICAL full request identity: {eventId, adapterId,
+  /// params, aoi, timeWindow, country, contractVersion} — re-running the
+  /// same request replays the original run instead of duplicating work,
+  /// while a changed AOI/window/country creates a NEW run (no stale replay).
   idempotencyKey String   @unique
   /// queued | running | succeeded | failed | dead
   status         String
@@ -181,11 +183,21 @@ model IngestionAttempt {
   runId      String
   run        IngestionRun @relation(fields: [runId], references: [id], onDelete: Cascade)
   attemptNo  Int
-  ok         Boolean
+  /// null while the attempt is RUNNING; true/false only after the attempt
+  /// has been finalized. A crash mid-run leaves null — never a false success.
+  ok         Boolean?
   httpStatus Int?
   latencyMs  Int?
+  /// Final failing stage (discover|acquire|validate|normalize|catalog).
+  stage      String?
+  /// Whether the orchestrator may automatically re-attempt this failure.
+  retryable  Boolean?
+  /// Correlates the attempt with provider-call logs (http-client logs the
+  /// same id). Never contains credentials.
+  correlationId String?
   error      String?
   startedAt  DateTime @default(now())
+  finishedAt DateTime?
 
   @@index([runId])
 }
