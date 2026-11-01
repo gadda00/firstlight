@@ -18,6 +18,15 @@ import type { ScoreManifest } from './scoring';
 
 /* ------------------------------------------------------------------ session */
 
+// PILOT-GRADE (labeled, deliberately): the bearer token is kept in
+// sessionStorage for the pilot. Any XSS in the page can read it — this is
+// acceptable ONLY for a bounded pilot and is documented in SECURITY.md
+// ("Authentication"), together with the mitigation set shipped alongside
+// it: 8-hour session TTL, server-side revocation on logout, strict CSP +
+// security headers on every response, tokens never placed in URLs/logs/
+// error envelopes/exports. The production upgrade is an HttpOnly,
+// SameSite=Strict session cookie with CSRF protection — the server-side
+// seam (login/logout/revoke) already supports swapping that in.
 const SESSION_KEY = 'firstlight.session';
 
 export interface ClientSession {
