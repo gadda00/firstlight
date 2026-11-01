@@ -224,7 +224,7 @@ export async function handleLayer(ctx: RequestContext): Promise<Response> {
   if (!ctx.auth) throw errors.unauthorized();
   const ev = await getOrgEvent(db, ctx.auth.user.orgId, routeParam(ctx, 'id'));
   const layer = await buildEventLayer(db, ev);
-  const { raw, decision, manifest } = layer;
+  const { raw, decision, manifest, provenance } = layer;
   // Lossless serialization: the client store reconstructs its typed layer
   // (EventRawData + EventDecisionData minus the Map index) directly from
   // this response — the server stays the single source of truth and the
@@ -246,6 +246,7 @@ export async function handleLayer(ctx: RequestContext): Promise<Response> {
         demoLayer: ev.demoLayer,
       },
       demo: raw.demo ?? null,
+      provenance,
       manifest,
       stats: decision.stats,
       zones: decisionRest.zones,

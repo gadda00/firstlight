@@ -135,6 +135,27 @@ export interface LayerResponse {
     demoLayer: boolean;
   };
   demo: EventRawData['demo'];
+  /** First-class honesty block: what the analysis is computed from. */
+  provenance: {
+    analysisMode: 'synthetic-scenario';
+    simulated: true;
+    label: string;
+    sourceAssetIds: string[];
+    sources: Array<{
+      adapterId: string;
+      assets: number;
+      simulated: number;
+      freshestAcquiredAt: string | null;
+      stalestAcquiredAt: string | null;
+    }>;
+    catalogAssets: number;
+    simulatedCatalogAssets: number;
+    processingVersion: string;
+    crs: string;
+    temporalWindow: { from: string; to: string };
+    qualityStatus: string;
+    notes: string[];
+  };
   manifest: ScoreManifest;
   stats: EventDecisionData['stats'];
   zones: EventDecisionData['zones'];
@@ -153,7 +174,13 @@ export interface LayerResponse {
  * (the only non-JSON member, zoneIndex, is reconstructed here). */
 export async function fetchEventLayer(
   eventId: string,
-): Promise<{ raw: EventRawData; decision: EventDecisionData; event: LayerResponse['event']; manifest: ScoreManifest }> {
+): Promise<{
+  raw: EventRawData;
+  decision: EventDecisionData;
+  event: LayerResponse['event'];
+  manifest: ScoreManifest;
+  provenance: LayerResponse['provenance'];
+}> {
   const r = await apiFetch<LayerResponse>(`/events/${encodeURIComponent(eventId)}/layer`);
   const raw: EventRawData = {
     meta: r.meta,
@@ -172,7 +199,7 @@ export async function fetchEventLayer(
     stats: r.stats,
     routes: [],
   };
-  return { raw, decision, event: r.event, manifest: r.manifest };
+  return { raw, decision, event: r.event, manifest: r.manifest, provenance: r.provenance };
 }
 
 /* ------------------------------------------------------- review / sitrep / exports */

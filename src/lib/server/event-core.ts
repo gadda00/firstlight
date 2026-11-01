@@ -6,7 +6,12 @@
  *     EXPLICIT opt-in — never silent in operational mode),
  *  2. Human review decisions from the database (immutable, attributed),
  *  3. The versioned score manifest (from the org's approved ScoreConfig or
- *     the documented default).
+ *     the documented default),
+ *  4. A first-class LayerProvenance block: the pipeline is a REAL-DATA
+ *     CATALOG + SYNTHETIC ANALYSIS — the response names the mode, the real
+ *     source asset ids, processing version, CRS, temporal window, quality
+ *     status and caveats, so synthetic geometry can never masquerade as
+ *     derived-from-imagery output.
  *
  * The result feeds the map layer endpoint, the claim tools, and sitrep
  * generation. Review changes are reflected on the next read (scores are
@@ -35,6 +40,125 @@ export interface EventLayer {
   raw: EventRawData;
   decision: EventDecisionData;
   manifest: ScoreManifest;
+  /** Honest statement of what this layer IS and IS NOT. */
+  provenance: LayerProvenance;
+}
+
+/* ------------------------------------------------------ layer provenance */
+
+/**
+ * Provenance contract for every served analysis layer (round 4).
+ *
+ * The operational pipeline today is a REAL-DATA CATALOG plus a SYNTHETIC
+ * ANALYSIS LAYER: open-data providers (USGS/NWS/Copernicus/FIRMS/OSM/…)
+ * populate a genuine, check-summed asset catalog, while the damage/flood
+ * geometry fed to scoring is still the labeled DemoScenarioProvider output
+ * (real raster → product processing is the roadmap's processing phase —
+ * see ARCHITECTURE.md). This block makes that split IMPOSSIBLE to miss:
+ * a real hazard catalog record never silently becomes a synthetic damage
+ * polygon, because the layer says exactly which parts are simulated.
+ */
+export interface LayerProvenance {
+  /** What the analysis geometry is computed from. */
+  analysisMode: 'synthetic-scenario';
+  /** True iff the damage/flood/scoring geometry is synthetic. */
+  simulated: true;
+  /** One-line honesty statement for UI banners. */
+  label: string;
+  /** Real catalog assets ingested for this event (bounded to the first 50
+   *  ids; the counts below are exact). Empty when nothing was ingested. */
+  sourceAssetIds: string[];
+  /** Per-adapter catalog summary (real vs simulated records). */
+  sources: Array<{
+    adapterId: string;
+    assets: number;
+    simulated: number;
+    freshestAcquiredAt: string | null;
+    stalestAcquiredAt: string | null;
+  }>;
+  /** Exact totals across sources. */
+  catalogAssets: number;
+  simulatedCatalogAssets: number;
+  /** Decision/scoring contract version backing `manifest`. */
+  processingVersion: string;
+  /** Coordinate reference system of the served geometry. */
+  crs: 'EPSG:4326';
+  /** Observation window the catalog covers. */
+  temporalWindow: { from: string; to: string };
+  /** Quality status of the layer computation itself. */
+  qualityStatus: 'computed-from-synthetic-scenario';
+  /** Explicit caveats — rendered, never truncated away. */
+  notes: string[];
+}
+
+/** Build the provenance block from the event's durable catalog state. */
+async function buildLayerProvenance(
+  db: PrismaClient,
+  ev: {
+    id: string;
+    incidentTime: Date;
+    demoLayer: boolean;
+  },
+): Promise<LayerProvenance> {
+  const assets = await db.assetRecord.findMany({
+    where: { eventId: ev.id },
+    select: {
+      id: true,
+      adapterId: true,
+      simulated: true,
+      acquiredAt: true,
+    },
+    orderBy: { acquiredAt: 'asc' },
+  });
+
+  const byAdapter = new Map<string, { assets: number; simulated: number; times: Date[] }>();
+  for (const a of assets) {
+    const entry = byAdapter.get(a.adapterId) ?? { assets: 0, simulated: 0, times: [] };
+    entry.assets += 1;
+    if (a.simulated) entry.simulated += 1;
+    if (a.acquiredAt) entry.times.push(a.acquiredAt);
+    byAdapter.set(a.adapterId, entry);
+  }
+
+  const simulatedCount = assets.filter((a) => a.simulated).length;
+
+  const notes = [
+    'Damage/flood geometry and priority scoring are computed from a LABELED SYNTHETIC SCENARIO, not from the ingested catalog.',
+    'Ingested provider records (catalog below) are real metadata references with checksums; they are NOT the source of the analysis polygons.',
+    'A real processing pipeline (asset → processing job → derived product → validation → score) is planned — see ARCHITECTURE.md "Processing phase".',
+  ];
+  if (assets.length === 0) {
+    notes.push('No provider assets have been ingested for this event yet — run POST /api/events/:id/ingest.');
+  }
+
+  return {
+    analysisMode: 'synthetic-scenario',
+    simulated: true,
+    label:
+      'Real-data catalog + synthetic analysis demo — analysis geometry is simulated and labeled as such',
+    sourceAssetIds: assets.slice(0, 50).map((a) => a.id),
+    sources: [...byAdapter.entries()].map(([adapterId, s]) => ({
+      adapterId,
+      assets: s.assets,
+      simulated: s.simulated,
+      freshestAcquiredAt: s.times.length
+        ? new Date(Math.max(...s.times.map((t) => t.getTime()))).toISOString()
+        : null,
+      stalestAcquiredAt: s.times.length
+        ? new Date(Math.min(...s.times.map((t) => t.getTime()))).toISOString()
+        : null,
+    })),
+    catalogAssets: assets.length,
+    simulatedCatalogAssets: simulatedCount,
+    processingVersion: DEFAULT_SCORE_MANIFEST.version,
+    crs: 'EPSG:4326',
+    temporalWindow: {
+      from: new Date(ev.incidentTime.getTime() - 7 * 86400_000).toISOString(),
+      to: new Date(ev.incidentTime.getTime() + 86400_000).toISOString(),
+    },
+    qualityStatus: 'computed-from-synthetic-scenario',
+    notes,
+  };
 }
 
 /** Load the org's approved score config, or the documented default. */
@@ -133,6 +257,11 @@ export async function buildEventLayer(
   // EXPLICIT opt-in: this event carries a labeled synthetic demo layer.
   const raw = DemoScenarioProvider.generate(meta, { allowInOperationalMode: true });
 
+  // The served layer always states, in first-class fields, exactly what the
+  // analysis is computed from (synthetic scenario) and which REAL catalog
+  // assets exist for the event. See LayerProvenance above.
+  const provenance = await buildLayerProvenance(db, ev);
+
   const manifest = await resolveManifest(db, ev.orgId);
 
   // Apply immutable review decisions from the database.
@@ -151,7 +280,7 @@ export async function buildEventLayer(
   const overrides: ReviewOverrides = { decisions, newClasses };
 
   const decision = computeDecision(raw, manifest.weights ?? DEFAULT_WEIGHTS, overrides, manifest);
-  return { raw, decision, manifest };
+  return { raw, decision, manifest, provenance };
 }
 
 /** Create review tasks for flagged detections (bounded, prioritized). */
