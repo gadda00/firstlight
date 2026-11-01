@@ -2,7 +2,7 @@
  * calls — exercises lease/concurrency behavior without a network. */
 
 import type { DataSourceAdapter } from '@/lib/server/adapters/types';
-import { registerAdapter } from '@/lib/server/adapters/registry';
+import { replaceAdapter } from '@/lib/server/adapters/registry';
 
 export interface SlowAdapterState {
   delayMs: number;
@@ -65,5 +65,5 @@ export function slowAdapter(state: SlowAdapterState): DataSourceAdapter {
 }
 
 export function registerSlowAdapter(state: SlowAdapterState): void {
-  registerAdapter(slowAdapter(state));
+  replaceAdapter(slowAdapter(state));
 }

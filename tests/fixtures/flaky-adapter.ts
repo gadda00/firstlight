@@ -2,7 +2,7 @@
  * succeeds afterwards — exercises the retry-after-failure ingestion path. */
 
 import type { DataSourceAdapter } from '@/lib/server/adapters/types';
-import { registerAdapter } from '@/lib/server/adapters/registry';
+import { replaceAdapter } from '@/lib/server/adapters/registry';
 
 export function flakyFetchAdapter(state: { fails: boolean }): DataSourceAdapter {
   return {
@@ -60,7 +60,9 @@ export function flakyFetchAdapter(state: { fails: boolean }): DataSourceAdapter 
   };
 }
 
-/** Local registration helper for dynamically-built adapters. */
+/** Local registration helper for dynamically-built adapters (authoritative:
+ *  replaces any instance an earlier test file may have left in the shared
+ *  in-process registry). */
 export function registerAdapterLocal(adapter: DataSourceAdapter): void {
-  registerAdapter(adapter);
+  replaceAdapter(adapter);
 }
