@@ -15,9 +15,11 @@ WORKDIR /app
 # Copy package files
 COPY package.json bun.lock* ./
 
-# Install dependencies (using bun for consistency)
+# Install dependencies (using bun for consistency). NOTE: bun's
+# --production flag takes no value, and dev deps ARE required — the
+# Next.js build itself runs in this stage.
 RUN npm install -g bun && \
-    bun install --frozen-lockfile --production=false
+    bun install --frozen-lockfile
 
 # Copy source files
 COPY . .
@@ -94,4 +96,6 @@ ENV DATABASE_URL=file:/app/db/firstlight.db
 # Demo/dev default: initialize SQLite, then serve. The PILOT profile
 # overrides command/entrypoint in docker-compose.yml (secrets gate +
 # `prisma migrate deploy` runs in the one-shot migrate service).
-CMD ["sh", "-c", "bunx prisma db push --skip-generate && bun run start"]
+# bun/bunx live only in the builder stage; this runtime is plain
+# node:22-alpine, so drive prisma + next through npx.
+CMD ["sh", "-c", "npx prisma db push --skip-generate && npx next start"]

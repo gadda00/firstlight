@@ -1,53 +1,20 @@
-# FirstLight Python Worker - Raster Processing & ML
-# Production dependencies
+# FirstLight Python Worker — REAL runtime dependencies
+#
+# The round-3 manifest listed the full raster/ML stack (torch, GDAL,
+# opencv, segmentation-models-pytorch, geopandas, …). None of it is
+# imported by any task: unimplemented capabilities return
+# `blocked_scaffold` naming their exact missing dependency (see
+# python/tasks.py — SCAFFOLD_BLOCKED_BY). Shipping an ~8 GB image of
+# unused libraries would be the infrastructure version of a fabricated
+# capability; the heavy stack arrives together with the processing-phase
+# code that actually imports it (TRANSFORMATION_ROADMAP).
+#
+# What really runs today:
+#   - the celery worker (entrypoint.sh -> celery -A tasks worker)
+#   - the hardened egress seam (secure_download.py — stdlib-only,
+#     24/24 unit tests)
+#   - upload_to_s3(): boto3 imported lazily and degrades gracefully when
+#     absent; included so the pilot compose profile's MinIO seam works.
 
-# Core scientific computing
-numpy>=1.24.0
-scipy>=1.10.0
-pandas>=2.0.0
-
-# Geospatial processing
-GDAL>=3.6.0
-rasterio>=1.3.0
-shapely>=2.0.0
-geopandas>=0.13.0
-pyproj>=3.4.0
-
-# Image processing
-opencv-python-headless>=4.8.0
-scikit-image>=0.20.0
-Pillow>=10.0.0
-
-# Machine learning
-torch>=2.0.0
-torchvision>=0.15.0
-torchaudio>=2.0.0
-scikit-learn>=1.3.0
-
-# Computer vision
-segmentation-models-pytorch>=0.3.0
-timm>=0.9.0
-
-# Distributed processing
-celery>=5.3.0
-redis>=4.5.0
-
-# Database
-psycopg2-binary>=2.9.0
-SQLAlchemy>=2.0.0
-
-# Cloud storage
+celery[redis]>=5.3.0
 boto3>=1.28.0
-
-# Utilities
-requests>=2.31.0
-pydantic>=2.0.0
-python-dotenv>=1.0.0
-structlog>=23.0.0
-
-# Monitoring
-prometheus-client>=0.17.0
-
-# Testing
-pytest>=7.4.0
-pytest-cov>=4.1.0

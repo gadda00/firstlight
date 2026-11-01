@@ -1,0 +1,12 @@
+# Keep the build context lean and secrets out of images.
+.git
+.github
+node_modules
+.next
+out
+db
+tests
+tool-results
+.env
+.env.*
+!.env.example
