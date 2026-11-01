@@ -22,6 +22,15 @@ RUN npm install -g bun && \
 # Copy source files
 COPY . .
 
+# DB_PROVIDER=sqlite (demo/dev/CI) or postgres (pilot). The pilot build
+# swaps in the generated prisma/schema.postgres.prisma so the embedded
+# Prisma client + `migrate deploy` target PostgreSQL — one persistence
+# model per image, chosen at build time, never mixed at runtime.
+ARG DB_PROVIDER=sqlite
+RUN if [ "$DB_PROVIDER" = "postgres" ]; then \
+      cp prisma/schema.postgres.prisma prisma/schema.prisma; \
+    fi
+
 # Generate Prisma client
 RUN bunx prisma generate
 
@@ -76,5 +85,7 @@ ENV NODE_ENV=production
 ENV PORT=3000
 ENV DATABASE_URL=file:/app/db/firstlight.db
 
-# Run the application
-CMD ["bun", "run", "start"]
+# Demo/dev default: initialize SQLite, then serve. The PILOT profile
+# overrides command/entrypoint in docker-compose.yml (secrets gate +
+# `prisma migrate deploy` runs in the one-shot migrate service).
+CMD ["sh", "-c", "bunx prisma db push --skip-generate && bun run start"]

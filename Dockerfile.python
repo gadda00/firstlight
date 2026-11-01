@@ -4,7 +4,7 @@
 # ============================================================================
 # Stage 1: Builder
 # ============================================================================
-FROM python:3.11-slim AS builder
+FROM python:3.11.9-slim AS builder
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -26,7 +26,7 @@ COPY python/ /app/python/
 # ============================================================================
 # Stage 2: Runtime
 # ============================================================================
-FROM python:3.11-slim AS runtime
+FROM python:3.11.9-slim AS runtime
 
 # Install runtime dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -75,17 +75,15 @@ RUN chmod +x /app/entrypoint.sh
 # Switch to non-root user
 USER python-worker
 
-# Expose port (for health checks)
-EXPOSE 5555
+# Health check — ping THIS worker node through the broker (the previous
+# :5555 HTTP health server never existed; this probe is real).
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD celery -A tasks inspect ping -d "celery@$HOSTNAME" || exit 1
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD python -c "import requests; requests.get('http://localhost:5555/health')" || exit 1
-
-# Set environment variables
+# Set environment variables (DATABASE_URL/REDIS_URL come from compose —
+# NEVER bake credentials into the image; the old default password is gone.)
 ENV PYTHONUNBUFFERED=1
 ENV REDIS_URL=redis://redis:6379/0
-ENV DATABASE_URL=postgresql://firstlight:firstlight_pass@postgres:5432/firstlight
 
 # Run the worker
 CMD ["/app/entrypoint.sh"]
