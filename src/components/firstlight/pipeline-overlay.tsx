@@ -1,6 +1,7 @@
-/* FirstLight — pipeline run overlay: paced stage animation mirroring the
- * blueprint's 5-stage pipeline (STAC ingest → preprocess → inference →
- * decision → delivery). Compute is real; timings are demo-scaled. */
+/* FirstLight — scenario generation overlay: paced stage animation showing
+ * the REAL compute steps performed in the browser on the generated data.
+ * There is no satellite ingestion and no ML inference here — presenting one
+ * would be a fabrication. Timings are UI pacing, not telemetry. */
 
 'use client';
 
@@ -21,7 +22,6 @@ export function PipelineOverlay() {
   if (phase !== 'running' || !raw) return null;
   const meta = eventById(eventId);
   const stages = raw.stages;
-  const totalMs = stages.reduce((a, s) => a + s.ms, 0);
   const pct = Math.min(100, (stageIndex / stages.length) * 100);
 
   return (
@@ -37,10 +37,10 @@ export function PipelineOverlay() {
           </svg>
           <div>
             <div className="text-xl font-black tracking-tight text-zinc-50">
-              Processing run
+              Generating synthetic scenario
             </div>
             <div className="text-xs text-zinc-500 font-mono">
-              {meta.name} · {meta.location}
+              {meta.name} · deterministic seed {meta.seed}
             </div>
           </div>
         </div>
@@ -53,9 +53,9 @@ export function PipelineOverlay() {
         </div>
         <div className="flex justify-between mt-1.5 mb-4 text-[10px] font-mono text-zinc-500">
           <span>
-            stage {Math.min(stageIndex + 1, stages.length)} / {stages.length}
+            step {Math.min(stageIndex + 1, stages.length)} / {stages.length}
           </span>
-          <span>target &lt; 30 min (demo-scaled: {(totalMs / 1000).toFixed(1)} s)</span>
+          <span>UI pacing — not pipeline telemetry</span>
         </div>
 
         <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 divide-y divide-zinc-800/70">
@@ -106,7 +106,7 @@ export function PipelineOverlay() {
 
         <div className="flex justify-between items-center mt-4">
           <span className="text-[10px] text-zinc-600 font-mono">
-            all layers procedurally simulated · deterministic seed {meta.seed}
+            every layer procedurally simulated in your browser · no satellite ingestion · no ML inference
           </span>
           <Button
             size="sm"

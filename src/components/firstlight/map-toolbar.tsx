@@ -68,12 +68,13 @@ export function MapToolbar() {
       {/* swipe + base */}
       <div className="flex items-center gap-2">
         <Label htmlFor="swipe-switch" className="text-[10px] font-semibold text-zinc-400">
-          PRE/POST SWIPE
+          BASEMAP / OVERLAY SWIPE
         </Label>
         <Switch
           id="swipe-switch"
           checked={swipe}
           onCheckedChange={setSwipe}
+          aria-label="Show the overlay comparison divider — left side basemap only, right side basemap plus generated scenario overlays"
           className="scale-90 data-[state=checked]:bg-amber-500"
         />
       </div>

@@ -156,7 +156,7 @@ function ZoneDetail({ zone }: { zone: NonNullable<ReturnType<typeof useFirstLigh
             className="w-full flex items-center justify-center gap-1.5 rounded-md border border-amber-500/50 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 text-[11px] font-semibold py-1.5 transition-colors"
           >
             <ArrowUpRight className="h-3.5 w-3.5" />
-            Route dispatch from {fireStation.name}
+            Tabletop route from {fireStation.name}
           </button>
         )}
       </div>

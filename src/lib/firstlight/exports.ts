@@ -1,6 +1,8 @@
 /* ==========================================================================
- * FirstLight — Export layer (blueprint: GeoJSON / CSV / PDF-ready sitrep /
- * audit trail). All exports are generated client-side from reviewed data.
+ * FirstLight — Export layer (SIMULATED EXERCISE artifacts).
+ * All exports are generated client-side from the reviewed synthetic data.
+ * Every artifact carries BOTH a human-readable warning and machine-readable
+ * synthetic flags (`simulated: true`, `scenario_id`, `seed`, provider).
  * ========================================================================== */
 
 import { fnv1a } from './rng';
@@ -34,9 +36,24 @@ const DAMAGE_COLOR: Record<DamageClass, string> = {
   none: '#22c55e',
 };
 
+const SIM_WARNING =
+  'SIMULATED EXERCISE — generated scenario data; not current conditions. No satellite imagery was acquired or processed.';
+
+/** Machine-readable synthetic stamp shared by every export artifact. */
+function scenarioStamp(raw: EventRawData) {
+  return {
+    simulated: true as const,
+    scenario_id: raw.meta.id,
+    seed: raw.meta.seed,
+    provider: 'demo-scenario-provider',
+    warning: SIM_WARNING,
+  };
+}
+
 export function damageGeoJSON(raw: EventRawData, overrides: ReviewOverrides) {
   return {
     type: 'FeatureCollection' as const,
+    ...scenarioStamp(raw),
     features: raw.buildings
       .filter((b) => {
         const d = overrides.decisions.get(b.id);
@@ -58,13 +75,14 @@ export function damageGeoJSON(raw: EventRawData, overrides: ReviewOverrides) {
             id: b.id,
             damage_class: eff,
             original_class: b.damage,
-            confidence: Number(b.confidence.toFixed(3)),
+            scenario_score: Number(b.confidence.toFixed(3)),
             area_m2: Math.round(b.areaM2),
             zone_h3: b.zone,
             reviewed: overrides.decisions.has(b.id) ? 'yes' : 'no',
             review_reason: b.reviewReason,
             color: DAMAGE_COLOR[eff],
-            provenance: 'simulated: Siamese UNet demo inference',
+            provenance: 'simulated: seeded procedural generator (no inference model ran)',
+            simulated: true as const,
           },
         };
       }),
@@ -74,6 +92,7 @@ export function damageGeoJSON(raw: EventRawData, overrides: ReviewOverrides) {
 export function floodGeoJSON(raw: EventRawData) {
   return {
     type: 'FeatureCollection' as const,
+    ...scenarioStamp(raw),
     features: raw.floods.map((f) => ({
       type: 'Feature' as const,
       id: f.id,
@@ -85,17 +104,19 @@ export function floodGeoJSON(raw: EventRawData) {
         id: f.id,
         depth_class: f.depthClass,
         area_km2: Number(f.areaKm2.toFixed(2)),
-        detection: f.source,
-        confidence: f.confidence,
-        provenance: 'simulated: SAR threshold + U-Net demo',
+        generator: f.source,
+        scenario_score: f.confidence,
+        provenance: 'simulated: procedural flood band (no imagery processed)',
+        simulated: true as const,
       },
     })),
   };
 }
 
-export function zonesGeoJSON(decision: EventDecisionData) {
+export function zonesGeoJSON(decision: EventDecisionData, raw: EventRawData) {
   return {
     type: 'FeatureCollection' as const,
+    ...scenarioStamp(raw),
     features: decision.zones.map((z) => ({
       type: 'Feature' as const,
       id: z.id,
@@ -122,6 +143,7 @@ export function zonesGeoJSON(decision: EventDecisionData) {
         flood_share: Number(z.floodShare.toFixed(3)),
         pre_hospital_min: isFinite(z.preHospitalMin) ? Math.round(z.preHospitalMin) : null,
         post_hospital_min: isFinite(z.postHospitalMin) ? Math.round(z.postHospitalMin) : null,
+        simulated: true as const,
       },
     })),
   };
@@ -130,6 +152,7 @@ export function zonesGeoJSON(decision: EventDecisionData) {
 export function roadsGeoJSON(raw: EventRawData) {
   return {
     type: 'FeatureCollection' as const,
+    ...scenarioStamp(raw),
     features: raw.roads.map((r) => ({
       type: 'Feature' as const,
       id: r.id,
@@ -144,15 +167,19 @@ export function roadsGeoJSON(raw: EventRawData) {
         block_cause: r.blockCause,
         speed_kmh: r.speedKmh,
         length_km: Number(r.lengthKm.toFixed(3)),
-        confidence: Number(r.confidence.toFixed(3)),
+        scenario_score: Number(r.confidence.toFixed(3)),
+        closure_kind: r.closure?.kind ?? null,
+        closure_source: r.closure?.source ?? null,
+        simulated: true as const,
       },
     })),
   };
 }
 
-export function routesGeoJSON(routes: RouteResult[]) {
+export function routesGeoJSON(routes: RouteResult[], raw: EventRawData) {
   return {
     type: 'FeatureCollection' as const,
+    ...scenarioStamp(raw),
     features: routes
       .filter((r) => r)
       .map((r) => ({
@@ -170,14 +197,21 @@ export function routesGeoJSON(routes: RouteResult[]) {
           eta_min: Number(r.etaMin.toFixed(1)),
           uses_flagged_segments: r.usesFlaggedSegments,
           blocked_edges_avoided: r.blockedEdgesAvoided,
-          confidence: Number(r.confidence.toFixed(3)),
+          scenario_score: Number(r.confidence.toFixed(3)),
+          closures_crossed: r.closuresCrossed,
+          requires_field_verification: r.requiresFieldVerification,
+          graph_version: r.graphVersion,
+          note: 'tabletop exercise route on a generated toy graph — not a safe-route instruction',
+          simulated: true as const,
         },
       })),
   };
 }
 
-export function zonesCSV(decision: EventDecisionData): string {
+export function zonesCSV(decision: EventDecisionData, raw: EventRawData): string {
   const head = [
+    'simulated',
+    'scenario_id',
     'rank',
     'h3_index',
     'tier',
@@ -201,6 +235,8 @@ export function zonesCSV(decision: EventDecisionData): string {
     .sort((a, b) => a.rank - b.rank)
     .map((z) =>
       [
+        'yes',
+        raw.meta.id,
         z.rank,
         z.id,
         z.tier,
@@ -244,9 +280,15 @@ export function auditTrail(bundle: ExportBundle) {
   const hash = fnv1a(JSON.stringify(sections));
   return {
     format: 'firstlight-audit-trail/1.0',
+    simulated: true as const,
+    scenario_id: raw.meta.id,
+    seed: raw.meta.seed,
+    provider: 'demo-scenario-provider',
+    warning: SIM_WARNING,
+    hash_algorithm:
+      'FNV-1a demo checksum — non-cryptographic; detects transcription drift only; does not verify truth, origin, or tamper-resistance',
     run_id: runId,
     generated_at: bundle.generatedAt,
-    disclaimer: 'SIMULATED DEMO DATA — cryptographic assertion hashes are FNV-1a demo checksums',
     human_in_loop: {
       sitrep_approved: Boolean(approvedBy),
       approved_by: approvedBy,
@@ -260,16 +302,21 @@ export function auditTrail(bundle: ExportBundle) {
 export function offlineBundle(bundle: ExportBundle) {
   return {
     format: 'firstlight-offline-bundle/1.0',
+    simulated: true as const,
+    scenario_id: bundle.raw.meta.id,
+    seed: bundle.raw.meta.seed,
+    provider: 'demo-scenario-provider',
+    warning: SIM_WARNING,
     run_id: bundle.runId,
     generated_at: bundle.generatedAt,
-    note: 'Air-gapped field bundle: layer GeoJSON, sitrep, and audit trail in one JSON file. See blueprint Layer 5 offline mode.',
+    note: 'SIMULATED EXERCISE bundle: every layer, the sitrep, and the audit trail describe generated scenario data — not current conditions. No real satellite imagery was processed. Routes are toy-graph exercise paths, not safe routes.',
     event: bundle.raw.meta,
     layers: {
       damage: damageGeoJSON(bundle.raw, bundle.overrides),
       flood: floodGeoJSON(bundle.raw),
-      zones: zonesGeoJSON(bundle.decision),
+      zones: zonesGeoJSON(bundle.decision, bundle.raw),
       roads: roadsGeoJSON(bundle.raw),
-      routes: routesGeoJSON(bundle.routes),
+      routes: routesGeoJSON(bundle.routes, bundle.raw),
     },
     sitrep_markdown: bundle.sitrep?.markdown ?? null,
     audit: auditTrail(bundle),
@@ -302,5 +349,5 @@ export function slugEvent(eventId: string): string {
 
 export function statsLine(decision: EventDecisionData): string {
   const s = decision.stats;
-  return `${fmtInt(s.affectedPop)} affected · ${fmtInt(s.destroyed + s.major)} bldg major+ · ${s.floodedAreaKm2.toFixed(1)} km² flood`;
+  return `${fmtInt(s.affectedPop)} affected (generated) · ${fmtInt(s.destroyed + s.major)} bldg major+ (generated) · ${s.floodedAreaKm2.toFixed(1)} km² generated flood`;
 }

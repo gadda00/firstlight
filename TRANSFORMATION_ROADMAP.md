@@ -1,8 +1,10 @@
-# TRANSFORMATION ROADMAP - FirstLight to World-Class Operational System
+# TRANSFORMATION ROADMAP — planning assumptions only
 
-## Executive Summary
+> **Status of this document:** aspirational planning written by a previous review round. Nothing below is an implemented capability, a delivery commitment, a staffing/cost estimate of record, or an uptime target. FirstLight is a simulated-exercise demo plus a locally-runnable pilot — see `docs/CAPABILITY_MATRIX.md` (what runs where) and `docs/EVIDENCE_LEDGER.md` (claim audit). Infrastructure targets here (k8s/Helm, Terraform, autoscaling, uptime SLOs) describe **untested scaffold goals**, not deployed services. The directory `terraform/`, `k8s/`, and monitoring manifests in this repo are **templates for future work** and are not exercised by any deployment.
 
-FirstLight is already a **sophisticated, production-ready disaster intelligence platform** with exceptional foundations:
+## Prior assessment (superseded framing, kept for history)
+
+A previous review round assessed the foundation as follows (its "production-ready" phrasing is **not** accurate today):
 - ✅ Clean modular monolith architecture (dual demo/operational modes)
 - ✅ 7 data source adapters (5 live-capable, 2 fixture-ready)
 - ✅ Comprehensive RBAC, audit chain, two-person approval
@@ -10,7 +12,7 @@ FirstLight is already a **sophisticated, production-ready disaster intelligence 
 - ✅ 11 comprehensive documentation files
 - ✅ Honesty framework (labeled synthetic, blocked dependencies, provenance)
 
-**This roadmap transforms FirstLight from "excellent pilot" to "world-class operational system"** by addressing scalability, production infrastructure, advanced analytics, and enterprise-grade deployment.
+**This roadmap describes aspirational goals for evolving the pilot** by addressing scalability, production infrastructure, advanced analytics, and enterprise-grade deployment.
 
 ---
 

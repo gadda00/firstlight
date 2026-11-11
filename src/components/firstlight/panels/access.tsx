@@ -1,5 +1,6 @@
 /* FirstLight — Access panel: isolation analysis (hospitals, communities)
- * + dispatch route planner on the passable-road graph. */
+ * + tabletop route planner on the GENERATED toy road graph. Routes are
+ * exercise artifacts — never dispatch instructions or safe routes. */
 
 'use client';
 
@@ -46,9 +47,10 @@ export function AccessPanel() {
           <Stat label="Blocked roads" value={`${blockedCount}`} sub={`${floodBlocked} flood · ${blockedCount - floodBlocked} debris`} tone="amber" />
         </div>
         <p className="text-[10px] leading-relaxed text-zinc-500">
-          Isolation = post-event travel time to the nearest functioning hospital
-          exceeds baseline by &gt; 30 min, or unreachable — computed by Dijkstra on
-          the passable-road graph (blocked edges removed).
+          Isolation = post-scenario travel time to the nearest functioning
+          hospital exceeds baseline by &gt; 30 min, or unreachable — computed by
+          Dijkstra on the <b>generated toy road graph</b> (generated closures
+          removed). Not an observation of any real network.
         </p>
       </div>
 
@@ -56,7 +58,7 @@ export function AccessPanel() {
       <section className="space-y-1.5">
         <div className="flex items-center gap-1.5 text-[10px] font-bold tracking-widest text-zinc-500">
           <Hospital className="h-3.5 w-3.5" />
-          HOSPITAL STATUS
+          HOSPITAL STATUS (generated — no facility was observed)
         </div>
         <div className="rounded-lg border border-zinc-800 overflow-hidden">
           {hospitals.map((h) => (
@@ -124,12 +126,18 @@ export function AccessPanel() {
         </section>
       )}
 
-      {/* route planner */}
+      {/* route planner — tabletop only */}
       <section className="space-y-2">
         <div className="flex items-center gap-1.5 text-[10px] font-bold tracking-widest text-zinc-500">
           <Ambulance className="h-3.5 w-3.5" />
-          DISPATCH ROUTE PLANNER
+          TABLETOP ROUTE PLANNER (toy graph)
         </div>
+        <p className="text-[9px] leading-relaxed text-zinc-600">
+          Exercise routes on the generated graph — not dispatch instructions,
+          not safe-route guidance, and not current traffic. Any route crossing
+          unverified/probable closures would demand field verification in a real
+          response.
+        </p>
         <RoutePlanner
           origins={origins.map((o) => ({ id: o.id, name: o.name, status: o.status }))}
           destZones={topZones.map((z) => ({ id: z.id, rank: z.rank, need: z.need }))}
@@ -162,12 +170,13 @@ export function AccessPanel() {
                   </div>
                   {r.usesFlaggedSegments ? (
                     <div className="text-[9px] leading-relaxed text-amber-300/90 bg-amber-500/10 border border-amber-500/30 rounded px-2 py-1">
-                      ⚠ Route relies on segments with unverified imagery /
-                      flood-adjacent edges — advise physical reconnaissance.
+                      ⚠ Exercise note: route crosses unverified/probable generated
+                      closures — in a real response this would demand field
+                      verification before any use.
                     </div>
                   ) : (
-                    <div className="text-[9px] text-emerald-400/80 font-mono">
-                      route confidence {r.confidence.toFixed(2)} — all segments verified
+                    <div className="text-[9px] text-zinc-500 font-mono">
+                      scenario score {r.confidence.toFixed(2)} — generated graph; nothing verified
                     </div>
                   )}
                 </div>
@@ -200,7 +209,7 @@ function RoutePlanner({
       <div className="grid grid-cols-1 gap-2">
         <div className="space-y-1">
           <span className="text-[9px] font-bold tracking-wider text-zinc-500 uppercase">
-            Origin (fire station)
+            Origin (synthetic fire post)
           </span>
           <Select value={originId} onValueChange={setOriginId}>
             <SelectTrigger className="h-8 text-[11px] bg-zinc-900 border-zinc-700">
@@ -246,7 +255,7 @@ function RoutePlanner({
         onClick={() => onRoute(originId, currentZone)}
       >
         <Ambulance className="h-3.5 w-3.5" />
-        Compute passable route
+        Compute exercise route
       </Button>
     </div>
   );

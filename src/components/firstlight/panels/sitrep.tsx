@@ -31,8 +31,8 @@ export function SitrepPanel() {
   if (!raw || !decision) return <div className="p-4 text-xs text-zinc-500">Loading…</div>;
 
   const routeNote = routes.length
-    ? `${routes.length} dispatch route(s) computed; ${routes.filter((r) => r?.usesFlaggedSegments).length} rely on unverified segments — ground reconnaissance advised.`
-    : 'No dispatch routes computed in this run.';
+    ? `${routes.length} tabletop route(s) computed; ${routes.filter((r) => r?.usesFlaggedSegments).length} rely on unverified segments — ground reconnaissance advised.`
+    : 'No tabletop routes computed in this run.';
 
   const onGenerate = () => {
     const result = generateSitrep({

@@ -67,22 +67,21 @@ export function OverviewPanel() {
           </span>
           <span className="text-zinc-400">
             {' '}
-            require prioritized response.{' '}
+            would demand prioritized response <b>if this were a real event</b> (it is not — tabletop ordering only).{' '}
             {s.isolatedZones > 0 &&
-              `${s.isolatedZones} zones isolated (travel-time delta > 30 min).`}
+              `${s.isolatedZones} zones isolated (travel-time delta > 30 min on the generated toy graph).`}
           </span>
         </div>
       </div>
 
       {/* event brief */}
       <Section icon={<MapPin className="h-3 w-3" />} title="EVENT BRIEF">
-        <div className="grid grid-cols-[100px_1fr] gap-x-3 gap-y-1 text-[11px]">
+        <div className="grid grid-cols-[110px_1fr] gap-x-3 gap-y-1 text-[11px]">
           <Meta k="Type" v={meta.archetype.toUpperCase()} />
-          <Meta k="Location" v={`${meta.location}, ${meta.country}`} />
-          <Meta k="Event date" v={meta.eventDate} />
-          <Meta k="AOI" v={`${(2 * meta.aoiKm).toFixed(0)} × ${(2 * meta.aoiKm).toFixed(0)} km (${s.aoiKm2.toFixed(0)} km²)`} />
-          <Meta k="Pre-image" v={`${meta.sensors.find((x) => x.role === 'pre')?.platform ?? ''} · ${meta.preDate}`} />
-          <Meta k="Post-image" v={`${meta.sensors.find((x) => x.role === 'post')?.platform ?? ''} · ${meta.postDate}`} />
+          <Meta k="AOI (basemap)" v={`${meta.location}`} />
+          <Meta k="Scenario clock" v={meta.eventDate} />
+          <Meta k="AOI size" v={`${(2 * meta.aoiKm).toFixed(0)} × ${(2 * meta.aoiKm).toFixed(0)} km (${s.aoiKm2.toFixed(0)} km²)`} />
+          <Meta k="Sensors" v="illustrative metadata — nothing acquired" />
           <Meta k="Run ID" v={runId} mono />
         </div>
         <p className="text-[11px] leading-relaxed text-zinc-400 mt-2">
@@ -90,18 +89,18 @@ export function OverviewPanel() {
         </p>
       </Section>
 
-      {/* KPI grid */}
-      <Section icon={<Gauge className="h-3 w-3" />} title="IMPACT KPIs">
+      {/* KPI grid — generated values, labeled as such */}
+      <Section icon={<Gauge className="h-3 w-3" />} title="GENERATED IMPACT KPIs (not measurements)">
         <div className="grid grid-cols-2 gap-2">
-          <Kpi icon={<Users className="h-3.5 w-3.5" />} label="Affected population" value={fmtInt(s.affectedPop)} sub={`${fmtPct(s.affectedPct)} of ${fmtInt(s.totalPop)}`} tone="amber" />
-          <Kpi icon={<Building2 className="h-3.5 w-3.5" />} label="Major + destroyed" value={fmtInt(s.destroyed + s.major)} sub={`${fmtInt(s.destroyed)} des · ${fmtInt(s.major)} maj of ${fmtInt(s.totalBuildings)}`} tone="red" />
-          <Kpi icon={<Waves className="h-3.5 w-3.5" />} label="Flood extent" value={`${s.floodedAreaKm2.toFixed(1)} km²`} sub={raw.floods.length ? `${raw.floods.length} SAR polygons` : 'not applicable'} tone="sky" />
-          <Kpi icon={<Eye className="h-3.5 w-3.5" />} label="Mean confidence" value={s.meanConfidence.toFixed(3)} sub={`${s.pendingReview} pending review`} tone="zinc" />
+          <Kpi icon={<Users className="h-3.5 w-3.5" />} label="Affected (modeled)" value={fmtInt(s.affectedPop)} sub={`${fmtPct(s.affectedPct)} of ${fmtInt(s.totalPop)} — generated`} tone="amber" />
+          <Kpi icon={<Building2 className="h-3.5 w-3.5" />} label="Major + destroyed (gen.)" value={fmtInt(s.destroyed + s.major)} sub={`${fmtInt(s.destroyed)} des · ${fmtInt(s.major)} maj of ${fmtInt(s.totalBuildings)} — generated labels`} tone="red" />
+          <Kpi icon={<Waves className="h-3.5 w-3.5" />} label="Flood extent (gen.)" value={`${s.floodedAreaKm2.toFixed(1)} km²`} sub={raw.floods.length ? `${raw.floods.length} generated polygons — no imagery processed` : 'not applicable'} tone="sky" />
+          <Kpi icon={<Eye className="h-3.5 w-3.5" />} label="Mean scenario score" value={s.meanConfidence.toFixed(3)} sub={`generated values — NOT probabilities · ${s.pendingReview} pending review`} tone="zinc" />
         </div>
       </Section>
 
-      {/* damage distribution */}
-      <Section icon={<Building2 className="h-3 w-3" />} title="DAMAGE DISTRIBUTION">
+      {/* damage distribution — generated labels */}
+      <Section icon={<Building2 className="h-3 w-3" />} title="DAMAGE DISTRIBUTION (generated labels)">
         <div className="space-y-1.5">
           <DistBar label="Destroyed" value={s.destroyed} max={damageMax} color="#ef4444" />
           <DistBar label="Major" value={s.major} max={damageMax} color="#f97316" />
@@ -143,8 +142,8 @@ export function OverviewPanel() {
         </div>
       </Section>
 
-      {/* run details */}
-      <Section icon={<Clock className="h-3 w-3" />} title="RUN DETAILS">
+      {/* run details — the real compute steps, honestly labeled */}
+      <Section icon={<Clock className="h-3 w-3" />} title="RUN DETAILS — real compute on generated data">
         <div className="space-y-1">
           {raw.stages.map((st) => (
             <div key={st.name} className="flex items-center justify-between text-[10px] font-mono">
@@ -153,7 +152,7 @@ export function OverviewPanel() {
             </div>
           ))}
           <div className="flex items-center justify-between text-[10px] font-mono pt-1 border-t border-zinc-800">
-            <span className="text-zinc-500">total (demo-scaled)</span>
+            <span className="text-zinc-500">total (UI pacing — not telemetry)</span>
             <span className="text-amber-400">{totalMs} ms</span>
           </div>
         </div>

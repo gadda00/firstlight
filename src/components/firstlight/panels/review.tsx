@@ -1,6 +1,8 @@
-/* FirstLight — Review queue: low-confidence detections routed to
- * human-in-the-loop validation (active-learning loop from the blueprint).
- * Confirm / reject / reclassify — corrections become training labels. */
+/* FirstLight — Review queue (SIMULATED EXERCISE, demo mode): generated
+ * detections with low scenario scores are routed to a human review queue.
+ * In this static demo the queue is EPHEMERAL: decisions live in browser
+ * memory only, do not survive reload, and NO model trains on them (no
+ * persistent, permissioned storage or training path exists in this repo). */
 
 'use client';
 
@@ -48,12 +50,15 @@ export function ReviewPanel() {
       <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-3 space-y-2">
         <div className="flex items-center gap-1.5 text-[10px] font-bold tracking-widest text-zinc-500">
           <ClipboardCheck className="h-3.5 w-3.5" />
-          ACTIVE-LEARNING REVIEW QUEUE
+          REVIEW QUEUE (demo — ephemeral)
         </div>
         <p className="text-[10px] leading-relaxed text-zinc-500">
-          Detections routed here by epistemic uncertainty (conf &lt; 0.70, TTA variance,
-          flood-edge ambiguity). Corrections become customer-specific labels — the
-          reviewed longitudinal dataset is the moat.
+          Generated detections routed here by the generator's simulated review
+          triggers (scenario score &lt; 0.70, flood-edge ambiguity, dense-cluster
+          occlusion). Your confirm/reject/reclassify decisions are{' '}
+          <b>browser-memory only</b> in this static demo — they do not survive a
+          reload and no model trains on them: no persistent, permissioned storage
+          or training path exists anywhere in this repository.
         </p>
         <div className="grid grid-cols-4 gap-1.5 text-center">
           <Stat label="Pending" value={String(pending.length)} tone="amber" />
@@ -65,10 +70,7 @@ export function ReviewPanel() {
           <div className="flex justify-between text-[9px] font-mono text-zinc-500">
             <span>review coverage {fmtPct(coverage, 0)}</span>
             <span>
-              reviewed precision {precision > 0 ? fmtPct(precision, 0) : '—'}
-              {precision > 0 && precision < 0.8 && (
-                <span className="text-red-400"> (target ≥ 80%)</span>
-              )}
+              confirmed ÷ (confirmed + rejected) {precision > 0 ? fmtPct(precision, 0) : '—'}
             </span>
           </div>
           <div className="h-1.5 rounded bg-zinc-800 overflow-hidden">
@@ -84,7 +86,7 @@ export function ReviewPanel() {
       <div className="space-y-1.5">
         {queue.length === 0 && (
           <div className="text-[11px] text-zinc-500 px-1 py-4 text-center">
-            No low-confidence detections in this event.
+            No low-scenario-score detections in this scenario.
           </div>
         )}
         {queue.slice(0, 60).map((b) => {
@@ -110,7 +112,7 @@ export function ReviewPanel() {
                     {DAMAGE_META[effClass].label.toUpperCase()}
                   </Badge>
                   <span className="text-[9px] font-mono text-zinc-600 truncate">
-                    {b.id.slice(-10)}
+                    {b.id.slice(-10)} · generated
                   </span>
                 </div>
                 <span

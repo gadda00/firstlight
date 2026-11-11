@@ -1,8 +1,11 @@
 /* ==========================================================================
- * FirstLight — procedural event data generator.
+ * FirstLight — procedural event data generator (SIMULATED EXERCISE).
  * Produces deterministic, seeded demo datasets: road grid + graph,
  * building stock, damage fields per archetype, flood extents, facilities,
- * population grid, and pipeline stage timings.
+ * population grid, and stage pacing. NOTHING here fetches external data,
+ * acquires imagery, or runs any ML inference — the stage list below
+ * describes the REAL compute steps performed in the browser on the
+ * generated fiction, and every source note is prefixed 'synthetic:'.
  * ========================================================================== */
 
 import { Rng } from './rng';
@@ -182,7 +185,7 @@ export function generateEvent(meta: EventMeta): EventRawData {
       ring,
       depthClass: 'moderate',
       areaKm2: ringAreaKm2(ring),
-      source: 'S1 RTC change-detect (Otsu) + U-Net fusion',
+      source: 'synthetic: procedural meander band (no imagery processed)',
       confidence: 0.93,
     });
   } else if (meta.archetype === 'hurricane') {
@@ -213,7 +216,7 @@ export function generateEvent(meta: EventMeta): EventRawData {
       ring,
       depthClass: 'deep',
       areaKm2: ringAreaKm2(ring),
-      source: 'S1 SAR threshold + surge DEM extrapolation',
+      source: 'synthetic: procedural surge band (no imagery or DEM used)',
       confidence: 0.9,
     });
     // estuary river band
@@ -231,7 +234,7 @@ export function generateEvent(meta: EventMeta): EventRawData {
       ring: rr,
       depthClass: 'moderate',
       areaKm2: ringAreaKm2(rr),
-      source: 'S1 SAR threshold + permanent-water mask',
+      source: 'synthetic: procedural estuary band (no imagery processed; no permanent-water mask exists)',
       confidence: 0.91,
     });
   }
@@ -437,7 +440,7 @@ export function generateEvent(meta: EventMeta): EventRawData {
       rd.blockCause = null;
     }
     // Phase 3: every blocked road carries a time-stamped closure
-    // observation with source + confidence (demo values, clearly seeded).
+    // observation with source + scenario score (all generator values).
     if (rd.blocked) {
       const kind =
         rd.blockCause === 'flood'
@@ -449,14 +452,17 @@ export function generateEvent(meta: EventMeta): EventRawData {
             : 'unverified';
       rd.closure = {
         observedAt: meta.eventDate,
-        source: rd.blockCause === 'flood' ? 'synthetic: SAR flood intersection' : 'synthetic: debris proxy buffer',
+        source: 'synthetic: generator flood-polygon intersection',
         confidence: Number(rng.range(0.7, 0.95).toFixed(2)),
         kind,
       };
     }
   }
 
-  /* ------------------------------------------------------------ facilities */
+  /* ------------------------------------------------- facilities */
+  // Facility names are deliberately generic + explicitly synthetic so they
+  // can never be mistaken for real hospitals/schools/utilities. Statuses are
+  // generator draws — NOT observations of any real facility.
   const facilities: Facility[] = [];
   const arterialNodes: { node: string; p: LatLng }[] = [];
   for (const rd of roads) {
@@ -519,23 +525,23 @@ export function generateEvent(meta: EventMeta): EventRawData {
     });
   };
 
-  addFacility('hospital', 'Bayfront Medical Center', 4.2);
-  addFacility('hospital', 'Northside Regional Hospital', 4.2);
-  addFacility('hospital', 'St. Vincent General', 3.6);
-  addFacility('hospital', 'Riverside Clinic Campus', 3.6);
-  addFacility('hospital', 'Lakeshore University Hospital', 3.2);
-  addFacility('fire_station', 'Fire Station 1 (Central)', 3.5);
-  addFacility('fire_station', 'Fire Station 3 (East)', 3.5);
-  addFacility('fire_station', 'Fire Station 7 (West)', 3.0);
-  addFacility('fire_station', 'Fire Station 9 (North)', 3.0);
-  for (let s = 1; s <= 10; s++) addFacility('school', `School ${s}`, 1.1);
-  for (let s = 1; s <= 5; s++) addFacility('shelter', `Community Shelter ${s}`, 1.6);
-  addFacility('water', 'Water Treatment Plant A', 5);
-  addFacility('water', 'Pumping Station B', 4);
-  addFacility('water', 'Reservoir & Pumping Station C', 4);
-  addFacility('power', 'Substation E-4', 4.5);
-  addFacility('power', 'Substation E-9', 4.5);
-  addFacility('power', 'Peaker Plant G-2', 5);
+  addFacility('hospital', 'Synthetic Hospital A1', 4.2);
+  addFacility('hospital', 'Synthetic Hospital A2', 4.2);
+  addFacility('hospital', 'Synthetic Hospital A3', 3.6);
+  addFacility('hospital', 'Synthetic Clinic A4', 3.6);
+  addFacility('hospital', 'Synthetic Clinic A5', 3.2);
+  addFacility('fire_station', 'Synthetic Fire Post F1', 3.5);
+  addFacility('fire_station', 'Synthetic Fire Post F2', 3.5);
+  addFacility('fire_station', 'Synthetic Fire Post F3', 3.0);
+  addFacility('fire_station', 'Synthetic Fire Post F4', 3.0);
+  for (let s = 1; s <= 10; s++) addFacility('school', `Synthetic School ${s}`, 1.1);
+  for (let s = 1; s <= 5; s++) addFacility('shelter', `Synthetic Shelter ${s}`, 1.6);
+  addFacility('water', 'Synthetic Water Utility W1', 5);
+  addFacility('water', 'Synthetic Water Utility W2', 4);
+  addFacility('water', 'Synthetic Water Utility W3', 4);
+  addFacility('power', 'Synthetic Substation E1', 4.5);
+  addFacility('power', 'Synthetic Substation E2', 4.5);
+  addFacility('power', 'Synthetic Peaker Plant E3', 5);
 
   /* --------------------------------------------------------- population */
   const popGrid: PopCell[] = [];
@@ -581,32 +587,29 @@ export function generateEvent(meta: EventMeta): EventRawData {
   }
 
   /* ------------------------------------------------------------ pipeline */
-  const aoiKm2 = (2 * A) ** 2;
-  const tiles = Math.round((aoiKm2 * 1e6) / (1024 * 1024 * 25)); // ~25 m/px demo tile
+  // HONEST stage list: these are the compute steps the browser actually
+  // performs on the generated data. There is NO satellite ingestion, NO
+  // raster preprocessing, and NO model inference — naming one would be a
+  // fabrication. `ms` is UI pacing, not telemetry.
   const stages: PipelineStage[] = [
     {
-      name: 'STAC ingest',
-      detail: `${meta.sensors.length} sources · cloud-screened · COG streaming`,
+      name: 'Scenario generation',
+      detail: 'seeded procedural generator — roads, buildings, hazards, facilities, population grid (no external data fetched)',
       ms: Math.round(rng.range(220, 380)),
     },
     {
-      name: 'Preprocess',
-      detail: 'Co-register · RTC gamma0 · speckle Lee 5×5 · tile 1024²',
+      name: 'Zone & need-score computation',
+      detail: 'H3 res-8 zoning · area-weighted flood share · uncertainty & sensitivity (real compute on generated data)',
       ms: Math.round(rng.range(260, 420)),
     },
     {
-      name: 'Model inference',
-      detail: `Siamese UNet ResNet-50 FP16 · ${tiles} tiles · flood Otsu+U-Net`,
-      ms: Math.round(rng.range(300, 480)),
-    },
-    {
-      name: 'Decision layer',
-      detail: 'H3 res-8 zoning · need scores · routing isolations',
+      name: 'Route & isolation analysis',
+      detail: 'baseline vs post-scenario Dijkstra on the generated toy road graph',
       ms: Math.round(rng.range(140, 240)),
     },
     {
-      name: 'Delivery',
-      detail: 'Exports staged · sitrep tool calls · review queue',
+      name: 'Report & export assembly',
+      detail: 'sitrep tool-call drafts · review queue · client-side export bundles',
       ms: Math.round(rng.range(90, 160)),
     },
   ];

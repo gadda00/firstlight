@@ -1,0 +1,283 @@
+{
+  "$comment": "FirstLight provider & source registry — the single machine-readable source of truth for provider statuses and terms. README tables, docs/PROVIDER_STATUS.md, and the demo UI Guide tab are generated from (or import) this file. 'verifiedInRepo' means a test in this repository exercises the implemented path; anything else is explicitly labeled. Never hand-edit generated outputs — edit this file and re-render.",
+  "lastVerified": "2026-11-11",
+  "statusVocabulary": [
+    "live — adapter implemented, called by tests with real endpoints",
+    "blocked — adapter implemented, credentials required and absent",
+    "fixtures-only — adapter implemented against fixtures, no live acquisition",
+    "catalog-only — metadata/catalog discovery implemented, no asset processing",
+    "candidate — researched lead, NOT implemented, access not verified",
+    "not connected"
+  ],
+  "modeLegend": {
+    "publicDemo": "what the static GitHub Pages demo can do",
+    "localPilot": "what the server-backed local pilot does when run with credentials",
+    "deployedService": "whether any public operational deployment exists (none does)"
+  },
+  "implemented": [
+    {
+      "id": "usgs-earthquake",
+      "provider": "USGS Earthquake Hazards Program",
+      "dataset": " earthquakes GeoJSON feed (event metadata only)",
+      "pilotStatus": "live",
+      "publicDemo": "not connected",
+      "dataRole": "hazard metadata — earthquake magnitude/location/time; NOT building damage",
+      "license": "USGS public domain (no restrictions)",
+      "attribution": "U.S. Geological Survey Earthquake Hazards Program",
+      "verifiedInRepo": "tests/adapters.test.ts",
+      "notes": "Live adapter with retries/timeout/SSRF allowlist. Earthquake metadata are never converted to damage claims."
+    },
+    {
+      "id": "nws-alerts",
+      "provider": "NOAA National Weather Service",
+      "dataset": " alerts/v2 endpoint",
+      "pilotStatus": "live",
+      "publicDemo": "not connected",
+      "dataRole": "official alert polygons/text — NOT damage assessment",
+      "license": "U.S. Government public domain (no restrictions)",
+      "attribution": "NOAA/NWS",
+      "verifiedInRepo": "tests/adapters.test.ts",
+      "notes": "Alerts are authoritative for warning text; they are not flood outlines and not impact measurements."
+    },
+    {
+      "id": "noaa",
+      "provider": "NOAA environmental data",
+      "dataset": " public data services (NOAA cornfield adapters)",
+      "pilotStatus": "live",
+      "publicDemo": "not connected",
+      "dataRole": "hazard context",
+      "license": "U.S. Government public domain (no restrictions)",
+      "attribution": "NOAA",
+      "verifiedInRepo": "tests/adapters.test.ts",
+      "notes": ""
+    },
+    {
+      "id": "open-meteo-flood",
+      "provider": "Open-Meteo (GloFAS discharge)",
+      "dataset": " GloFAS-derived river discharge API",
+      "pilotStatus": "live",
+      "publicDemo": "not connected",
+      "dataRole": "river discharge forecasts — NOT flood outlines",
+      "license": "CC BY 4.0 (Open-Meteo)",
+      "attribution": "Open-Meteo; GloFAS © Copernicus EMS / ECMWF",
+      "verifiedInRepo": "tests/adapters.test.ts",
+      "notes": "Discharge values are not flood polygons, depth, or damage. The adapter records them as hazard context only."
+    },
+    {
+      "id": "copernicus-stac",
+      "provider": "Copernicus Data Space Ecosystem",
+      "dataset": " STAC catalog discovery for Sentinel-1/2 products",
+      "pilotStatus": "live (catalog only)",
+      "publicDemo": "not connected",
+      "dataRole": "catalog metadata — listing is not an acquisition",
+      "license": "Copernicus Sentinel data: free, full and open access under the Copernicus data licence / Data Space legal notice",
+      "attribution": " contains modified Copernicus Sentinel data [year]",
+      "verifiedInRepo": "tests/adapters.test.ts",
+      "notes": "DISCOVERY ONLY: a catalog result is not an acquired image, and no raster processing exists (worker reports blocked_scaffold). Registering/authenticating for asset download is the documented next step — not done here."
+    },
+    {
+      "id": "osm-overpass",
+      "provider": "OpenStreetMap via Overpass API",
+      "dataset": " bounded road/facility queries (AOI-limited)",
+      "pilotStatus": "live",
+      "publicDemo": "not connected",
+      "dataRole": "road/facility context — passability is NEVER implied",
+      "license": "ODbL 1.0",
+      "attribution": "© OpenStreetMap contributors",
+      "verifiedInRepo": "tests/adapters.test.ts",
+      "notes": "Facility presence from OSM says nothing about post-event status; status stays unknown until authoritative/field confirmation."
+    },
+    {
+      "id": "osint",
+      "provider": "OSINT aggregator",
+      "dataset": " open news/social/public-records feeds (fixture-backed in tests)",
+      "pilotStatus": "live (aggregated open feeds)",
+      "publicDemo": "not connected",
+      "dataRole": "context leads — always unverified until corroborated",
+      "license": "per-source; feed items carry their own terms",
+      "attribution": "per-source",
+      "verifiedInRepo": "tests/adapters.test.ts",
+      "notes": "OSINT items are leads, never evidence of facility status or casualty counts."
+    },
+    {
+      "id": "firms-fire",
+      "provider": "NASA FIRMS",
+      "dataset": " thermal anomalies (fire) API",
+      "pilotStatus": "blocked — requires free FIRSTLIGHT_FIRMS_TOKEN (MAP_TOKEN)",
+      "publicDemo": "not connected",
+      "dataRole": "thermal anomalies — NOT confirmed fire perimeters",
+      "license": "NASA open data",
+      "attribution": "NASA FIRMS",
+      "verifiedInRepo": "tests/adapters.test.ts (fixture contract)",
+      "notes": "Honest blocker: credentials absent. Even when live, a thermal anomaly is not a fire perimeter."
+    },
+    {
+      "id": "worldpop",
+      "provider": "WorldPop",
+      "dataset": " UN-adjusted population grids",
+      "pilotStatus": "fixtures-only — raster intersection deferred",
+      "publicDemo": "synthetic illustrative grid (clearly labeled, NOT WorldPop data)",
+      "dataRole": "population context (modelled estimates with vintage/uncertainty)",
+      "license": "CC BY 4.0",
+      "attribution": "WorldPop, University of Southampton",
+      "verifiedInRepo": "tests/adapters.test.ts (fixtures)",
+      "notes": "Population figures are modelled estimates of where people live — never 'people currently present', never casualty counts."
+    },
+    {
+      "id": "planet",
+      "provider": "Planet Labs",
+      "dataset": " Planet APIs (SuperDove tasking/search)",
+      "pilotStatus": "blocked — requires FIRSTLIGHT_PLANET_API_KEY",
+      "publicDemo": "not connected (demo sensor entries are illustrative metadata only)",
+      "dataRole": "high-resolution imagery (commercial)",
+      "license": "commercial terms apply per contract",
+      "attribution": "Imagery © Planet Labs, Inc.",
+      "verifiedInRepo": "src/lib/server/adapters/__tests__/planet.test.ts (fixture contract)",
+      "notes": "Adapter contract tested; no live acquisition possible without credentials."
+    },
+    {
+      "id": "maxar",
+      "provider": "Maxar Open Data",
+      "dataset": " event-release imagery",
+      "pilotStatus": "blocked — requires FIRSTLIGHT_MAXAR_CLIENT_ID/SECRET",
+      "publicDemo": "not connected (demo sensor entries are illustrative metadata only)",
+      "dataRole": "high-resolution event imagery",
+      "license": "event-release terms — verify before derivative/commercial use",
+      "attribution": "© Maxar Technologies",
+      "verifiedInRepo": "tests/adapters.test.ts (fixture contract)",
+      "notes": ""
+    },
+    {
+      "id": "sentinel-hub",
+      "provider": "Sentinel Hub (Sinergise)",
+      "dataset": " processed Sentinel/Landsat/DEM via OGC APIs",
+      "pilotStatus": "blocked — requires FIRSTLIGHT_SENTINELHUB_CLIENT_ID/SECRET",
+      "publicDemo": "not connected",
+      "dataRole": "raster processing services",
+      "license": "commercial/subscription tiers",
+      "attribution": "© Sentinel Hub / Sinergise",
+      "verifiedInRepo": "tests/adapters.test.ts (fixture contract)",
+      "notes": ""
+    },
+    {
+      "id": "ecmwf",
+      "provider": "ECMWF",
+      "dataset": " open-data/forecast APIs",
+      "pilotStatus": "blocked — requires FIRSTLIGHT_ECMWF_API_KEY",
+      "publicDemo": "not connected",
+      "dataRole": "weather/forecast context",
+      "license": "ECMWF open data terms",
+      "attribution": "ECMWF",
+      "verifiedInRepo": "tests/adapters.test.ts (fixture contract)",
+      "notes": ""
+    },
+    {
+      "id": "twitter",
+      "provider": "X/Twitter API",
+      "dataset": " post/disaster keyword search",
+      "pilotStatus": "blocked — requires FIRSTLIGHT_TWITTER_BEARER_TOKEN",
+      "publicDemo": "not connected",
+      "dataRole": "OSINT context only",
+      "license": "X API terms",
+      "attribution": "per X API terms",
+      "verifiedInRepo": "tests/adapters.test.ts (fixture contract)",
+      "notes": "No scraping; API only, terms respected."
+    }
+  ],
+  "candidates": [
+    {
+      "id": "copernicus-sds-assets",
+      "provider": "Copernicus Data Space Ecosystem (assets)",
+      "dataset": "Sentinel-1 SAR GRD, Sentinel-2 MSI L2A — asset download + processing",
+      "status": "candidate — catalog discovery live; asset download/processing NOT implemented",
+      "researchedTerms": "Sentinel data free/full/open per Copernicus data licence; attribution 'contains modified Copernicus Sentinel data [year]'; registration required for API/OData access",
+      "whyValuable": "Cloud/day-night-resilient SAR + optical for event-specific observations; enables a reproducible real-data pilot",
+      "ownerNextAction": "Register account, verify OAuth client-credentials flow server-side, download one dated scene with checksum, then build raster pipeline seam"
+    },
+    {
+      "id": "opera-dswx",
+      "provider": "NASA OPERA via PO.DAAC/CMR",
+      "dataset": "DSWx-S1 (30 m surface water from Sentinel-1), DSWx-HLS (from Landsat/S2)",
+      "status": "candidate — not implemented",
+      "researchedTerms": "NASA open data; products contain modified Copernicus Sentinel data; access via Earthdata login + CMR/PO.DAAC",
+      "whyValuable": "Official product-level surface-water classifications with granule/time/quality metadata — distinguishes provider product from FirstLight derived change",
+      "ownerNextAction": "Earthdata account + CMR granule search for AOI/date; verify product docs for mask semantics; integrate as observed source layer"
+    },
+    {
+      "id": "nsmc-fengyun",
+      "provider": "China NSMC Fengyun Data Portal",
+      "dataset": "FY-series image/atmosphere/land/ocean/radiation/space-weather products",
+      "status": "candidate — access not verified (account review + product order + FTP route not tested)",
+      "researchedTerms": "UNKNOWN until tested: registration review, product ordering, API/automation, quotas, retention, attribution, redistribution, commercial rights",
+      "whyValuable": "Additional optical/microwave coverage and cadence for AOIs of interest",
+      "ownerNextAction": "Register, order one test product for an AOI/date, and seek written answers on API/automation, delivery, quotas, attribution and commercial rights; otherwise leave 'candidate / access not verified'"
+    },
+    {
+      "id": "cnsa-creesda",
+      "provider": "CNSA/CRESDA Gaofen international sharing",
+      "dataset": "Gaofen series (moderate-resolution multispectral)",
+      "status": "candidate — portal availability/product availability for AOI+date not verified",
+      "researchedTerms": "UNKNOWN until tested: account rules, bulk/API access, delivery timing, license/reuse rights, image metadata",
+      "whyValuable": "Broad screening/context imagery at moderate resolution",
+      "ownerNextAction": "Verify portal works, find products for a target AOI/date, test account + download route, and obtain written reuse terms; screening-only use (not building-level)"
+    },
+    {
+      "id": "isprs-datasets",
+      "provider": "ISPRS benchmark datasets (e.g. Vaihingen)",
+      "dataset": "aerial orthophotos + DSM + labels",
+      "status": "candidate — discovery index only; per-dataset access/license must be checked",
+      "researchedTerms": "per-dataset: not all ISPRS-linked datasets share access or licensing",
+      "whyValuable": "Offline research/segmentation training material",
+      "ownerNextAction": "Pick one dataset page; verify bands, resolution, dates, label semantics and exact terms before any training use"
+    },
+    {
+      "id": "xbd-xview2",
+      "provider": "xBD / xView2",
+      "dataset": "pre/post disaster imagery with building damage labels",
+      "status": "candidate — research/training/retrospective evaluation only",
+      "researchedTerms": "CC BY-NC-SA 4.0 (non-commercial, share-alike); underlying imagery terms add further restrictions — a commercial-use gate",
+      "whyValuable": "The canonical building-damage benchmark for research",
+      "ownerNextAction": "For any commercial path, replace with commercially-clear imagery/labels; benchmark scores are never event validation"
+    },
+    {
+      "id": "sen1floods11",
+      "provider": "Sen1Floods11",
+      "dataset": "Sentinel-1 + Sentinel-2 chips with surface-water labels",
+      "status": "candidate — research/retrospective evaluation only; access/terms not re-verified from this repo",
+      "researchedTerms": "access and current terms must be re-verified before use",
+      "whyValuable": "Flood-mapping benchmark",
+      "ownerNextAction": "Re-verify current hosting, license, and split semantics before training/eval use"
+    },
+    {
+      "id": "openaerialmap",
+      "provider": "OpenAerialMap",
+      "dataset": "community/UAV imagery per-asset",
+      "status": "candidate — optional source-discovery layer",
+      "researchedTerms": "per-asset: acquisition date, footprint, resolution, license and availability vary per upload",
+      "whyValuable": "Post-event UAV imagery discovery where it exists",
+      "ownerNextAction": "Inspect each asset's date/footprint/resolution/license before use; skip assets without acceptable coverage/rights"
+    },
+    {
+      "id": "ghsl",
+      "provider": "EC GHSL",
+      "dataset": "global human settlement layers",
+      "status": "candidate — not implemented",
+      "researchedTerms": "EC/JRC open data with attribution",
+      "whyValuable": "Alternative built-settlement/population context layer",
+      "ownerNextAction": "Verify current terms + AOI coverage before integrating"
+    },
+    {
+      "id": "gpm-imerg-chirps",
+      "provider": "NASA GPM IMERG / CHIRPS",
+      "dataset": "satellite precipitation estimates",
+      "status": "candidate — not implemented",
+      "researchedTerms": "NASA open data / UCSB CHIRPS terms (verify before use)",
+      "whyValuable": "Rainfall context for flood archetypes",
+      "ownerNextAction": "Verify terms + latency + resolution; integrate as hazard context only"
+    }
+  ],
+  "deployedServiceStatus": {
+    "publicOperationalDeployment": false,
+    "statement": "No public operational deployment of FirstLight exists. The GitHub Pages site is a static simulated exercise; the operational mode is a locally-runnable, server-backed pilot only."
+  }
+}

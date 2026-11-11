@@ -1,7 +1,10 @@
 /* ==========================================================================
- * FirstLight — dual-synced swipe map (before/after comparison).
- * BEFORE map: clean satellite. AFTER map: satellite + decision overlays.
- * Draggable divider clips the after map (classic swipe pattern).
+ * FirstLight — dual-synced swipe comparison map.
+ * LEFT map: clean basemap. RIGHT map: the SAME basemap + generated scenario
+ * overlays. This is NOT a before/after imagery comparison — both sides show
+ * the same real basemap tiles (© OSM · Esri · CARTO); no event imagery
+ * exists in the demo. The draggable (and keyboard-operable) divider clips
+ * the overlay side.
  * ========================================================================== */
 
 'use client';
@@ -397,14 +400,14 @@ export default function MapView() {
         y: e.point.y,
         title: `Zone #${p.rank} · ${String(p.tier).toUpperCase()}`,
         rows: [
-          { label: 'Need score', value: (p.need as number).toFixed(3) },
+          { label: 'Need score (gen.)', value: (p.need as number).toFixed(3) },
           {
-            label: 'Buildings des/maj',
+            label: 'Bldg des/maj (gen.)',
             value: `${p.destroyed}/${p.major} of ${p.buildings}`,
           },
-          { label: 'Population', value: fmt(p.population as number) },
-          { label: 'Affected', value: fmt(p.affected_pop as number) },
-          { label: 'Flood share', value: `${Math.round((p.flood_share as number) * 100)}%` },
+          { label: 'Population (gen.)', value: fmt(p.population as number) },
+          { label: 'Affected (gen.)', value: fmt(p.affected_pop as number) },
+          { label: 'Flood share (gen.)', value: `${Math.round((p.flood_share as number) * 100)}%` },
           { label: 'Isolated', value: p.isolated ? 'YES' : 'no' },
           { label: 'H3', value: String(p.h3) },
         ],
@@ -470,6 +473,20 @@ export default function MapView() {
     (e.target as HTMLElement).releasePointerCapture(e.pointerId);
   }, []);
 
+  /** Keyboard: ←/→ adjust the divider by 3% (a11y — not mouse-only). */
+  const onDividerKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+      e.preventDefault();
+      setSplit((v) => Math.max(5, Math.min(95, v + (e.key === 'ArrowRight' ? 3 : -3))));
+    } else if (e.key === 'Home') {
+      e.preventDefault();
+      setSplit(5);
+    } else if (e.key === 'End') {
+      e.preventDefault();
+      setSplit(95);
+    }
+  }, []);
+
   const tierCounts = useMemo(() => {
     if (!decision)
       return { warning: 0, watch: 0, informational: 0, insufficient_evidence: 0 };
@@ -487,13 +504,13 @@ export default function MapView() {
       ref={containerRef}
       className="absolute inset-0 overflow-hidden bg-zinc-950"
     >
-      {/* BEFORE map (clean) — inline position beats maplibre's `.maplibregl-map{position:relative}` */}
+      {/* BEFORE map (clean basemap) — inline position beats maplibre's `.maplibregl-map{position:relative}` */}
       <div
         ref={beforeRef}
         className={swipe ? '' : 'hidden'}
         style={{ position: 'absolute', inset: 0 }}
       />
-      {/* AFTER map (analysis) — clipped by divider */}
+      {/* AFTER map (same basemap + scenario overlays) — clipped by divider */}
       <div
         ref={afterRef}
         style={{
@@ -503,34 +520,43 @@ export default function MapView() {
         }}
       />
 
-      {/* swipe divider */}
+      {/* swipe divider — pointer AND keyboard operable */}
       {swipe && (
         <div
           className="absolute top-0 bottom-0 z-20 w-0.5 bg-amber-400/90 cursor-col-resize"
           style={{ left: `${split}%` }}
+          role="slider"
+          tabIndex={0}
+          aria-label="Overlay comparison divider — arrow keys adjust; left is basemap, right is basemap plus generated scenario overlays"
+          aria-valuemin={5}
+          aria-valuemax={95}
+          aria-valuenow={Math.round(split)}
+          aria-valuetext={`${Math.round(split)}% of map width shows scenario overlays`}
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
+          onKeyDown={onDividerKeyDown}
         >
           <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 h-9 w-9 rounded-full bg-amber-400 shadow-lg shadow-amber-500/40 border-4 border-zinc-950 flex items-center justify-center">
-            <span className="text-[10px] font-black text-zinc-950 tracking-wider">
+            <span className="text-[10px] font-black text-zinc-950 tracking-wider" aria-hidden="true">
               ⇄
             </span>
           </div>
         </div>
       )}
 
-      {/* pane labels */}
+      {/* pane labels — honest: both panes use the SAME basemap; the right
+       * pane adds generated overlays. No before/after imagery exists. */}
       {swipe && (
         <>
           <div className="absolute top-3 left-3 z-10 rounded-md bg-zinc-950/75 backdrop-blur px-2.5 py-1 border border-zinc-800">
             <span className="text-[10px] font-semibold tracking-widest text-zinc-300">
-              PRE-EVENT · {meta?.preDate ?? ''}
+              BASEMAP — no scenario overlays
             </span>
           </div>
           <div className="absolute top-3 right-3 z-10 rounded-md bg-zinc-950/75 backdrop-blur px-2.5 py-1 border border-amber-500/40">
             <span className="text-[10px] font-semibold tracking-widest text-amber-300">
-              POST-EVENT ANALYSIS · {meta?.postDate ?? ''}
+              BASEMAP + GENERATED OVERLAYS
             </span>
           </div>
         </>
@@ -538,24 +564,31 @@ export default function MapView() {
       {!swipe && (
         <div className="absolute top-3 left-3 z-10 rounded-md bg-zinc-950/75 backdrop-blur px-2.5 py-1 border border-amber-500/40">
           <span className="text-[10px] font-semibold tracking-widest text-amber-300">
-            POST-EVENT ANALYSIS · {meta?.postDate ?? ''}
+            BASEMAP + GENERATED OVERLAYS
           </span>
         </div>
       )}
 
-      {/* legend */}
+      {/* on-map simulated badge */}
+      <div className="absolute top-3 left-1/2 -translate-x-1/2 z-10 rounded-md bg-amber-400 px-2 py-0.5 border border-amber-600 pointer-events-none">
+        <span className="text-[9px] font-black tracking-widest text-zinc-950">
+          SIMULATED OVERLAYS
+        </span>
+      </div>
+
+      {/* legend — every overlay row says what it actually is */}
       <div className="absolute bottom-3 left-3 z-10 rounded-lg bg-zinc-950/85 backdrop-blur border border-zinc-800 px-3 py-2.5 space-y-1.5 max-w-[210px]">
         <div className="text-[10px] font-bold tracking-widest text-zinc-400 mb-1">
-          LEGEND
+          LEGEND · GENERATED OVERLAYS
         </div>
-        <LegendRow color="#ef4444" label={`Destroyed · ${tierCounts.warning} warning zones`} />
-        <LegendRow color="#f97316" label={`Major damage · ${tierCounts.watch} watch zones`} />
-        <LegendRow color="#fbbf24" label="Minor damage" />
-        <LegendRow color="#38bdf8" label="Flood extent (SAR)" />
-        <LegendRow color="#a1a1aa" label="Passable road" />
-        <LegendRow color="#ef4444" label="Blocked road (dashed)" dashed />
-        <LegendRow color="#fafafa" label="H = hospital · R = shelter" />
-        <LegendRow color="#f59e0b" label="Dispatch route" dashed />
+        <LegendRow color="#ef4444" label={`Destroyed label · ${tierCounts.warning} warning zones`} />
+        <LegendRow color="#f97316" label={`Major damage label · ${tierCounts.watch} watch zones`} />
+        <LegendRow color="#fbbf24" label="Minor damage label" />
+        <LegendRow color="#38bdf8" label="Flood extent (generated)" />
+        <LegendRow color="#a1a1aa" label="Road (generated, passable)" />
+        <LegendRow color="#ef4444" label="Generated closure (dashed)" dashed />
+        <LegendRow color="#fafafa" label="H hospital · R shelter (synthetic)" />
+        <LegendRow color="#f59e0b" label="Tabletop route (toy graph)" dashed />
       </div>
 
       {/* zone tooltip */}

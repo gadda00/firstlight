@@ -24,7 +24,9 @@ export interface LatLng {
   lng: number;
 }
 
-/** Imagery / data source provenance record — "never silently mix sources". */
+/** Catalog-style provenance record. In the demo these are ILLUSTRATIVE ONLY
+ *  (simulated: true) — nothing was acquired; the fields show what provenance
+ *  WOULD accompany a real-data catalog run. */
 export interface ImagerySource {
   id: string;
   role: 'pre' | 'post' | 'aux';
@@ -35,6 +37,8 @@ export interface ImagerySource {
   cloudPct: number | null; // null => SAR (cloud-independent)
   license: string;
   processing: string;
+  /** True (demo catalog) = illustrative metadata — NO acquisition occurred. */
+  simulated?: boolean;
 }
 
 export interface EventMeta {
@@ -64,7 +68,9 @@ export interface Building {
   lat: number;
   footprint: [number, number][]; // closed ring [lng, lat]
   damage: DamageClass;
-  confidence: number; // 0..1
+  /** Generated scenario score (0..1) — a seeded procedural value, NOT a model
+   *  probability. Exports surface it as `scenario_score` for that reason. */
+  confidence: number;
   areaM2: number;
   zone: string; // H3 index (res 8)
   reviewReason: string | null;
@@ -125,6 +131,7 @@ export interface FloodPolygon {
   ring: [number, number][]; // closed ring [lng, lat]
   depthClass: 'shallow' | 'moderate' | 'deep';
   areaKm2: number;
+  /** Generator method note — always prefixed 'synthetic:' in the demo. */
   source: string;
   confidence: number;
 }
@@ -132,6 +139,7 @@ export interface FloodPolygon {
 export interface PipelineStage {
   name: string;
   detail: string;
+  /** UI pacing delay — explicitly NOT pipeline telemetry. */
   ms: number;
 }
 

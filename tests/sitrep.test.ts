@@ -28,10 +28,12 @@ describe('generateSitrep', () => {
   const ctx = makeCtx();
   const sitrep = generateSitrep(ctx);
 
-  test('markdown header carries classification, location, run id, approval state', () => {
-    expect(sitrep.markdown).toContain('SITUATION REPORT');
-    expect(sitrep.markdown).toContain('SIMULATED DEMONSTRATION DATA');
+  test('markdown header carries synthetic-exercise classification, scenario, run id, approval state', () => {
+    expect(sitrep.markdown).toContain('SYNTHETIC EXERCISE REPORT');
+    expect(sitrep.markdown).toContain('SIMULATED EXERCISE — GENERATED SCENARIO DATA');
+    expect(sitrep.markdown).toContain('generated fiction');
     expect(sitrep.markdown).toContain(meta.location);
+    expect(sitrep.markdown).toContain(`seed ${meta.seed}`);
     expect(sitrep.markdown).toContain('run-test01');
     expect(sitrep.markdown).toContain('PENDING');
   });
@@ -68,7 +70,34 @@ describe('generateSitrep', () => {
     expect(other.markdown).not.toBe(sitrep.markdown);
   });
 
-  test('provenance appendix lists every sensor with license', () => {
+  test('recommendations are hypothetical tabletop prompts, never imperatives', () => {
+    expect(sitrep.markdown).toContain('Hypothetical Tabletop Discussion (NOT dispatch instructions)');
+    expect(sitrep.markdown).toContain('If this were a real event');
+    expect(sitrep.markdown).toContain('no action below is executed');
+    // forbidden imperative phrasings must not appear in the recommendations context
+    expect(sitrep.markdown).not.toMatch(/dispatch ground assessment teams to/);
+    expect(sitrep.markdown).not.toMatch(/queue drone tasking/);
+  });
+
+  test('body text never implies real imagery or SAR processing', () => {
+    expect(sitrep.markdown).toContain('No imagery was acquired or processed');
+    expect(sitrep.markdown).toContain('no SAR was thresholded');
+    expect(sitrep.markdown).toContain('illustrative catalog-metadata shapes');
+    expect(sitrep.markdown).toContain('NOT model probabilities');
+  });
+
+  test('checksum honesty note distinguishes FNV-1a from signatures and the pilot chain', () => {
+    expect(sitrep.markdown).toContain('non-cryptographic FNV-1a demo checksums');
+    expect(sitrep.markdown).toContain('are **not** digital signatures');
+    expect(sitrep.markdown).toContain('SHA-256 audit chain');
+    expect(sitrep.markdown).not.toContain('tamper-proof');
+    expect(sitrep.markdown).not.toContain('authenticated evidence');
+  });
+
+  test('provenance appendix marks every sensor illustrative and the population synthetic', () => {
+    expect(sitrep.markdown).toContain('ILLUSTRATIVE (not acquired)');
+    expect(sitrep.markdown).toContain('NOT WorldPop');
+    expect(sitrep.markdown).toContain('NOT OpenStreetMap data');
     for (const s of meta.sensors) {
       expect(sitrep.markdown).toContain(s.platform);
       expect(sitrep.markdown).toContain(s.license);

@@ -152,7 +152,7 @@ export async function buildExport(
         event: { id: ev.id, name: ev.name },
         manifest: manifestOut,
         ...demoLabel,
-        ...zonesGeoJSON(decision),
+        ...zonesGeoJSON(decision, raw),
       };
       break;
     case 'roads.geojson':
@@ -170,7 +170,7 @@ export async function buildExport(
         kind,
         event: { id: ev.id, name: ev.name },
         ...demoLabel,
-        ...routesGeoJSON([]),
+        ...routesGeoJSON([], raw),
       };
       break;
     case 'zones.csv': {
@@ -182,7 +182,7 @@ export async function buildExport(
         event: { id: ev.id, name: ev.name },
         manifest: manifestOut,
         ...demoLabel,
-        csv: zonesCSV(decision),
+        csv: zonesCSV(decision, raw),
       };
       break;
     }
@@ -280,7 +280,7 @@ export async function buildOfflineBundle(
   const layers = {
     damage: damageGeoJSON(raw, { decisions: new Map(), newClasses: new Map() }),
     flood: floodGeoJSON(raw),
-    zones: zonesGeoJSON(decision),
+    zones: zonesGeoJSON(decision, raw),
     roads: roadsGeoJSON(raw),
   };
   const layerChecksums: Record<string, string> = {};

@@ -1,8 +1,11 @@
 /* ==========================================================================
- * FirstLight — Grounded Sitrep Engine (blueprint Layer 5).
- * Deterministic report generation: the "LLM layer" here drafts from typed
- * tool calls over the results database — every number in the text is bound
- * to a logged tool assertion. No free-form model invents measurements.
+ * FirstLight — Grounded Sitrep Engine (SIMULATED EXERCISE report).
+ * Deterministic report generation over the generated scenario: every number
+ * in the text is bound to a logged tool assertion over the synthetic
+ * dataset. The report identifies itself as a synthetic exercise at the
+ * top, beside the recommendations, and in the provenance appendix —
+ * not only in a header line. Recommendations are hypothetical tabletop
+ * discussion prompts, never dispatch instructions.
  * ========================================================================== */
 
 import { fnv1a } from './rng';
@@ -61,31 +64,29 @@ export function generateSitrep(ctx: SitrepContext): SitrepResult {
   const reviewed = overrides.decisions.size;
   const confirmed = [...overrides.decisions.values()].filter((d) => d === 'confirmed').length;
   const rejected = [...overrides.decisions.values()].filter((d) => d === 'rejected').length;
-  const sarPost = meta.sensors.find((x) => x.sensor.includes('SAR'));
-  const opticalPre = meta.sensors.find((x) => x.role === 'pre' && !x.sensor.includes('SAR'));
-  const opticalPost = meta.sensors.find((x) => x.role === 'post' && !x.sensor.includes('SAR') && !x.sensor.includes('population'));
+  const simulatedSensors = meta.sensors.filter((x) => x.simulated);
 
   const c1 = next(
     'get_event_summary',
     `{event_id: "${meta.id}"}`,
-    `AOI ${(2 * meta.aoiKm).toFixed(0)}×${(2 * meta.aoiKm).toFixed(0)} km, event ${meta.eventDate}, post-image ${meta.postDate}`,
+    `AOI ${(2 * meta.aoiKm).toFixed(0)}×${(2 * meta.aoiKm).toFixed(0)} km, generated scenario (scenario clock ${meta.eventDate})`,
   );
   const c2 = next(
     'get_event_summary',
     `{event_id: "${meta.id}", facet: "damage"}`,
-    `${fmtInt(s.totalBuildings)} buildings assessed: ${fmtInt(s.destroyed)} destroyed / ${fmtInt(s.major)} major / ${fmtInt(s.minor)} minor`,
+    `${fmtInt(s.totalBuildings)} generated buildings: ${fmtInt(s.destroyed)} destroyed / ${fmtInt(s.major)} major / ${fmtInt(s.minor)} minor (all labels drawn by the seeded generator)`,
   );
   const c3 = next(
     'get_event_summary',
     `{event_id: "${meta.id}", facet: "flood"}`,
     raw.floods.length
-      ? `flood extent ${s.floodedAreaKm2.toFixed(1)} km² across ${raw.floods.length} polygons (${raw.floods.map((f) => f.source).join('; ')})`
-      : 'no flood extent detected for this archetype',
+      ? `generated flood extent ${s.floodedAreaKm2.toFixed(1)} km² across ${raw.floods.length} polygons (procedural bands; no imagery processed)`
+      : 'no flood polygons generated for this archetype',
   );
   const c4 = next(
     'get_event_summary',
     `{event_id: "${meta.id}", facet: "population"}`,
-    `affected population ≈ ${fmtInt(s.affectedPop)} of ${fmtInt(s.totalPop)} (${fmtPct(s.affectedPct)})`,
+    `generated affected-population estimate ≈ ${fmtInt(s.affectedPop)} of ${fmtInt(s.totalPop)} (${fmtPct(s.affectedPct)}) — illustrative model, not a census product`,
   );
   const c5 = next(
     'top_zones',
@@ -95,51 +96,58 @@ export function generateSitrep(ctx: SitrepContext): SitrepResult {
   const c6 = next(
     'isolated_facilities',
     `{event_id: "${meta.id}", type: "hospital"}`,
-    `${offlineH.length} offline, ${degradedH.length} degraded, ${s.isolatedZones} isolated zones`,
+    `${offlineH.length} offline, ${degradedH.length} degraded, ${s.isolatedZones} isolated zones (generated statuses — no facility was observed)`,
   );
   const c7 = next(
     'low_confidence_areas',
     `{event_id: "${meta.id}"}`,
-    `${pending} detections below 0.70 confidence awaiting review (${reviewed} reviewed)`,
+    `${pending} detections below 0.70 generated scenario score awaiting review (${reviewed} reviewed)`,
   );
 
   const lines: string[] = [];
-  lines.push(`# SITUATION REPORT — ${meta.name.toUpperCase()}`);
+  lines.push(`# SYNTHETIC EXERCISE REPORT — ${meta.name.toUpperCase()}`);
   lines.push('');
-  lines.push(`**Classification:** SIMULATED DEMONSTRATION DATA — not an operational product`);
+  lines.push(
+    '**Classification:** SIMULATED EXERCISE — GENERATED SCENARIO DATA. Not current conditions, not real event reporting, not an operational product.',
+  );
+  lines.push(
+    `**Scenario:** ${meta.id} · seed ${meta.seed} — every footprint, closure, status, and population figure below is generated fiction.`,
+  );
   lines.push(`**Location:** ${meta.location}, ${meta.country}`);
   lines.push(`**Run ID:** ${runId} · **Generated:** ${ctx.generatedAt.toISOString()}`);
-  lines.push(`**Analyst approval:** PENDING — this draft requires human sign-off before distribution`);
+  lines.push(
+    '**Analyst approval:** PENDING — this draft requires human sign-off before distribution',
+  );
   lines.push('');
   lines.push('---');
   lines.push('');
-  lines.push('## 1. Event Summary');
+  lines.push('## 1. Scenario Summary');
   lines.push('');
   lines.push(
-    `${meta.description} Area of interest covers ${(2 * meta.aoiKm).toFixed(0)} × ${(2 * meta.aoiKm).toFixed(0)} km, with post-event imagery acquired ${meta.postDate} ${c1}. Imagery basis: ${opticalPre ? `${opticalPre.platform} (${opticalPre.date}, ${opticalPre.resolutionM} m, ${opticalPre.cloudPct}% cloud) ` : ''}${sarPost ? `and ${sarPost.platform} SAR ${sarPost.date} (cloud-independent)` : opticalPost ? `and ${opticalPost.platform} ${opticalPost.date}` : ''}.`,
+    `${meta.description} Area of interest covers ${(2 * meta.aoiKm).toFixed(0)} × ${(2 * meta.aoiKm).toFixed(0)} km ${c1}. **No imagery was acquired or processed for this report.** The sensor records below are illustrative catalog-metadata shapes (${simulatedSensors.length} entries, all marked "not acquired") ${simulatedSensors.length ? `: ${simulatedSensors.map((x) => x.platform.replace(' (illustrative metadata)', '')).join(', ')}` : ''}.`,
   );
   lines.push('');
-  lines.push('## 2. Impact Assessment');
+  lines.push('## 2. Generated Impact Assessment');
   lines.push('');
   lines.push(
-    `- **Buildings:** model assessment of ${fmtInt(s.totalBuildings)} structures: **${fmtInt(s.destroyed)} destroyed**, **${fmtInt(s.major)} major damage**, ${fmtInt(s.minor)} minor damage ${c2}. Structural damage rate (major+destroyed): **${fmtPct(s.damageRate)}**.`,
+    `- **Buildings:** generated labels for ${fmtInt(s.totalBuildings)} structures: **${fmtInt(s.destroyed)} destroyed**, **${fmtInt(s.major)} major damage**, ${fmtInt(s.minor)} minor damage ${c2}. Combined major+destroyed label rate: **${fmtPct(s.damageRate)}**.`,
   );
   if (raw.floods.length) {
     lines.push(
-      `- **Flood extent:** **${s.floodedAreaKm2.toFixed(1)} km²** mapped from SAR change detection with permanent-water masking ${c3}.`,
+      `- **Flood extent:** **${s.floodedAreaKm2.toFixed(1)} km²** of generated flood polygons (procedural bands — no SAR was thresholded, no DEM was used) ${c3}.`,
     );
   }
   lines.push(
-    `- **Population:** estimated **${fmtInt(s.affectedPop)} people affected** (${fmtPct(s.affectedPct)} of AOI population) by damage or inundation footprints ${c4}.`,
+    `- **Population:** generated estimate of **≈${fmtInt(s.affectedPop)} people affected** (${fmtPct(s.affectedPct)} of the scenario's nominal AOI population) by the generated damage or inundation footprints — an illustrative model, not a measurement of any real population ${c4}.`,
   );
   lines.push(
-    `- **Mean detection confidence:** ${s.meanConfidence.toFixed(3)}; ${fmtInt(s.pendingReview)} detections queued for human review ${c7}.`,
+    `- **Mean generated scenario score:** ${s.meanConfidence.toFixed(3)} (seeded procedural values — NOT model probabilities); ${fmtInt(s.pendingReview)} detections queued for human review ${c7}.`,
   );
   lines.push('');
   lines.push('## 3. Priority Zones (H3 res-8 need scores)');
   lines.push('');
   lines.push(
-    `Ranked by need(z) = 0.35·D + 0.25·Pexp + 0.25·Iso + 0.15·Crit — transparent and tunable with partner agencies ${c5}:`,
+    `Ranked by need(z) = 0.35·D + 0.25·Pexp + 0.25·Iso + 0.15·Crit over the generated data — transparent, tunable, and UNCALIBRATED heuristic weights ${c5}:`,
   );
   lines.push('');
   lines.push('| Rank | Zone (H3) | Tier | Need | D | Pexp | Iso | Crit | Bldg (des/maj) | Pop |');
@@ -150,79 +158,93 @@ export function generateSitrep(ctx: SitrepContext): SitrepResult {
     );
   }
   lines.push('');
-  lines.push('## 4. Isolation & Access');
+  lines.push('## 4. Isolation & Access (generated network)');
   lines.push('');
   lines.push(
-    `- **Hospitals:** ${offlineH.length} offline (${offlineH.map((h) => h.name).join(', ') || 'none'}), ${degradedH.length} degraded, ${s.hospitalsIsolated} isolated by travel-time delta > 30 min ${c6}.`,
+    `- **Hospitals:** ${offlineH.length} offline (${offlineH.map((h) => h.name).join(', ') || 'none'}), ${degradedH.length} degraded, ${s.hospitalsIsolated} isolated by travel-time delta > 30 min — all generated statuses; no facility was observed ${c6}.`,
   );
   lines.push(
-    `- **Communities:** ${s.isolatedZones} H3 zones isolated on the passable-road graph (baseline vs post-event Dijkstra on OSM-derived network).`,
+    `- **Communities:** ${s.isolatedZones} H3 zones isolated on the generated toy-road graph (baseline vs post-scenario Dijkstra — not an OSM or current-conditions network).`,
   );
   if (isolatedZones.length) {
     lines.push(
-      `  - Highest-priority isolated zones: ${isolatedZones.slice(0, 4).map((z) => `#${z.rank} (${fmtInt(z.population)} pop)`).join(', ')}.`,
+      `  - Highest-priority isolated zones: ${isolatedZones.slice(0, 4).map((z) => `#${z.rank} (${fmtInt(z.population)} generated pop)`).join(', ')}.`,
     );
   }
   if (ctx.routeNote) lines.push(`- **Routing:** ${ctx.routeNote}`);
   lines.push(
-    `- Roads flagged as blocked: ${raw.roads.filter((r) => r.blocked).length} of ${raw.roads.length} segments (flood intersection or debris proxy buffers).`,
+    `- Roads carrying generated closures: ${raw.roads.filter((r) => r.blocked).length} of ${raw.roads.length} generated segments (flood-polygon intersection or debris-proxy draws).`,
   );
   lines.push('');
   lines.push('## 5. Data Quality & Limitations');
   lines.push('');
   lines.push(
-    `- Confidence-driven review queue: ${fmtInt(s.pendingReview)} pending, ${reviewed} reviewed (${confirmed} confirmed, ${rejected} rejected as false positives) ${c7}.`,
+    `- Review queue: ${fmtInt(s.pendingReview)} pending, ${reviewed} reviewed (${confirmed} confirmed, ${rejected} rejected) by scenario score ${c7}. In this static demo, review decisions are ephemeral — they do not persist across reloads and no model retrains on them.`,
   );
   lines.push(
-    `- Known failure modes handled explicitly: ${sarPost ? 'urban double-bounce and wind-roughened water in SAR flood maps; ' : ''}${meta.archetype === 'earthquake' ? 'rubble/shadow occlusion in dense collapse pockets; ' : 'flood-edge ambiguity at detection boundaries; '}domain shift across regions.`,
+    `- The failure modes a real SAR/optical pipeline would face (urban double-bounce, wind-roughened water, flood-edge ambiguity, rubble/shadow occlusion, domain shift) are simulated here as generator penalties — they are not measured errors of this system.`,
   );
   lines.push(
-    `- Imagery gaps: optical cloud cover may delay confirmation; SAR provides all-weather screening but not depth estimation.`,
-  );
-  lines.push(
-    `- **All damage footprints, facility statuses and population figures in this report are procedurally SIMULATED for platform demonstration** and must not be used operationally.`,
+    `- **No real data entered this report.** Sensor metadata is illustrative; population is a synthetic 2-centre Gaussian grid; roads and facilities are procedurally generated. Nothing here has been field-verified.`,
   );
   lines.push('');
-  lines.push('## 6. Recommended Actions (DRAFT — requires analyst approval)');
+  lines.push('## 6. Hypothetical Tabletop Discussion (NOT dispatch instructions)');
   lines.push('');
   lines.push(
-    `- **WARNING-tier zones:** dispatch ground assessment teams to ${decision.zones.filter((z) => z.tier === 'warning').length} zones; prioritize ${top[0] ? `zone #${top[0].rank}` : 'n/a'}.`,
+    'For exercise discussion only — no action below is executed, authorized, or recommended by this document:',
+  );
+  lines.push('');
+  lines.push(
+    `- **If this were a real event:** ground-truth teams would be dispatched to the ${decision.zones.filter((z) => z.tier === 'warning').length} warning-tier zones, starting with zone #${top[0]?.rank ?? 'n/a'} — discuss that ordering and whether the need-score weights would change it.`,
   );
   lines.push(
-    `- **WATCH-tier zones:** monitor and queue drone tasking for confirmation of uncertain detections.`,
+    `- **Uncertain detections:** in a real response, confirmation tasking (e.g. drone) would be queued for low-score detections — discuss which zones justify that cost in this scenario.`,
   );
   lines.push(
-    `- **Isolation:** verify hospital access routes; establish alternate staging if travel-time deltas persist.`,
+    `- **Isolation:** discuss how responders would verify hospital access with the data actually available, and where alternate staging would sit if travel-time deltas persisted.`,
   );
   lines.push(
-    `- **Review queue:** clear pending low-confidence detections before distributing derived statistics.`,
+    `- **Review discipline:** discuss what evidence threshold would be required before any derived statistic left the analyst room.`,
   );
   lines.push('');
   lines.push('---');
   lines.push('');
-  lines.push('## Appendix A — Tool Call Log (grounded assertions)');
+  lines.push('## Appendix A — Tool Call Log (grounded over the synthetic dataset)');
   lines.push('');
-  lines.push('Every figure in this report was produced by a typed tool call over the results database:');
+  lines.push(
+    'Every figure in this report was produced by a typed tool call over the generated results database:',
+  );
   lines.push('');
   toolCalls.forEach((tc, i) => {
     lines.push(`${i + 1}. \`${tc.tool}(${tc.params})\` → ${tc.result}`);
-    lines.push(`   assertion hash: \`${fnv1a(`${tc.tool}:${tc.params}:${tc.result}`)}\``);
+    lines.push(`   demo checksum: \`${fnv1a(`${tc.tool}:${tc.params}:${tc.result}`)}\` (FNV-1a)`);
   });
   lines.push('');
-  lines.push('## Appendix B — Provenance');
+  lines.push(
+    '> **Checksum honesty:** the values above are non-cryptographic FNV-1a demo checksums. They detect transcription drift within this demo only — they are **not** digital signatures and do **not** verify the truth, origin, or tamper-resistance of any assertion. The operational pilot (local, server-backed) uses a separate SHA-256 audit chain for its server workflow; that chain is not present in this static demo.',
+  );
+  lines.push('');
+  lines.push('## Appendix B — Provenance (all illustrative)');
   lines.push('');
   for (const src of meta.sensors) {
     lines.push(
-      `- **${src.role.toUpperCase()}** ${src.platform} · ${src.sensor} · ${src.date} · ${src.resolutionM} m · ${src.cloudPct === null ? 'SAR (cloud-independent)' : `${src.cloudPct}% cloud`} · ${src.license} · ${src.processing}`,
+      `- **${src.role.toUpperCase()} · ILLUSTRATIVE (not acquired):** ${src.platform} · ${src.sensor} · ${src.date} · nominal ${src.resolutionM} m — ${src.license}`,
     );
   }
-  lines.push('- Population: WorldPop 100 m UN-adjusted (CC BY 4.0) — simulated grid for demo');
-  lines.push('- Roads & facilities: OSM-derived synthetic network (ODbL-style attribution retained)');
+  lines.push(
+    '- Population: synthetic 2-centre Gaussian grid (~300 m cells) scaled to the scenario total — illustrative model, NOT WorldPop or any census product.',
+  );
+  lines.push(
+    '- Roads & facilities: procedurally generated grid network and generic synthetic facilities — NOT OpenStreetMap data.',
+  );
+  lines.push(
+    '- Basemap only: © OpenStreetMap contributors · Esri · CARTO (map tiles; no imagery of the AOI is used).',
+  );
   lines.push('');
 
   return { markdown: lines.join('\n'), toolCalls, assertions };
 }
 
 export function zoneSummaryLine(z: Zone): string {
-  return `Zone #${z.rank} — need ${z.need.toFixed(3)} (${z.tier}), ${z.destroyed} destroyed / ${z.major} major of ${z.buildings} buildings, ${fmtInt(z.population)} pop${z.isolated ? ', ISOLATED' : ''}`;
+  return `Zone #${z.rank} — need ${z.need.toFixed(3)} (${z.tier}), ${z.destroyed} destroyed / ${z.major} major of ${z.buildings} generated buildings, ${fmtInt(z.population)} generated pop${z.isolated ? ', ISOLATED' : ''}`;
 }

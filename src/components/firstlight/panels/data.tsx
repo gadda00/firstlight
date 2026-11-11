@@ -60,7 +60,7 @@ export function DataPanel() {
       <div className="space-y-1.5">
         <div className="flex items-center gap-1.5 text-[10px] font-bold tracking-widest text-zinc-500">
           <Satellite className="h-3.5 w-3.5" />
-          IMAGERY & SOURCE HIERARCHY
+          SENSOR RECORDS — ILLUSTRATIVE (nothing was acquired)
         </div>
         {raw.meta.sensors.map((src) => (
           <div
@@ -71,18 +71,28 @@ export function DataPanel() {
               <span className="text-[11px] font-semibold text-zinc-200 truncate">
                 {src.platform}
               </span>
-              <Badge
-                variant="outline"
-                className={`h-4 px-1.5 text-[8px] font-bold shrink-0 ${
-                  src.role === 'post'
-                    ? 'border-red-500/50 bg-red-500/10 text-red-300'
-                    : src.role === 'pre'
-                      ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-300'
-                      : 'border-zinc-600 text-zinc-400'
-                }`}
-              >
-                {src.role.toUpperCase()}
-              </Badge>
+              <span className="flex items-center gap-1.5 shrink-0">
+                {src.simulated && (
+                  <Badge
+                    variant="outline"
+                    className="h-4 px-1.5 text-[8px] font-bold border-amber-500/60 bg-amber-500/10 text-amber-300"
+                  >
+                    NOT ACQUIRED
+                  </Badge>
+                )}
+                <Badge
+                  variant="outline"
+                  className={`h-4 px-1.5 text-[8px] font-bold shrink-0 ${
+                    src.role === 'post'
+                      ? 'border-red-500/50 bg-red-500/10 text-red-300'
+                      : src.role === 'pre'
+                        ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-300'
+                        : 'border-zinc-600 text-zinc-400'
+                  }`}
+                >
+                  {src.role.toUpperCase()}
+                </Badge>
+              </span>
             </div>
             <div className="grid grid-cols-[86px_1fr] gap-x-2 gap-y-0.5 text-[9px] font-mono">
               <span className="text-zinc-600">sensor</span>
@@ -90,10 +100,12 @@ export function DataPanel() {
               <span className="text-zinc-600">date</span>
               <span className="text-zinc-300">{src.date}</span>
               <span className="text-zinc-600">resolution</span>
-              <span className="text-zinc-300">{src.resolutionM} m GSD</span>
-              <span className="text-zinc-600">cloud</span>
-              <span className="text-zinc-300">
-                {src.cloudPct === null ? 'n/a (SAR)' : `${src.cloudPct}%`}
+              <span className="text-zinc-300">{src.resolutionM} m nominal</span>
+              <span className="text-zinc-600">status</span>
+              <span
+                className={src.simulated ? 'text-amber-400 font-bold' : 'text-zinc-300'}
+              >
+                {src.simulated ? 'NOT ACQUIRED — illustrative record' : 'see registry'}
               </span>
               <span className="text-zinc-600">license</span>
               <span className="text-zinc-400 leading-snug">{src.license}</span>
@@ -107,41 +119,42 @@ export function DataPanel() {
       <div className="space-y-1.5">
         <div className="flex items-center gap-1.5 text-[10px] font-bold tracking-widest text-zinc-500">
           <Database className="h-3.5 w-3.5" />
-          DERIVED LAYERS
+          DERIVED LAYERS (all generated)
         </div>
         <div className="rounded-lg border border-zinc-800 overflow-hidden text-[10px]">
           <LayerRow
             icon={<Building className="h-3 w-3 text-orange-400" />}
-            name="Building damage"
-            detail={`${fmtInt(raw.buildings.length)} detections · Siamese UNet (simulated inference) · mean conf ${decision.stats.meanConfidence.toFixed(3)}`}
+            name="Building damage (generated)"
+            detail={`${fmtInt(raw.buildings.length)} generated labels · seeded procedural generator — no model ran · mean scenario score ${decision.stats.meanConfidence.toFixed(3)}`}
           />
           <LayerRow
             icon={<Waypoints className="h-3 w-3 text-zinc-300" />}
-            name="Road network graph"
-            detail={`${raw.roads.length} segments · ${blocked} blocked (${raw.roads.filter((r) => r.blockCause === 'flood').length} flood / ${raw.roads.filter((r) => r.blockCause === 'debris').length} debris) · OSM-derived synthetic grid`}
+            name="Road network graph (generated)"
+            detail={`${raw.roads.length} segments · ${blocked} generated closures (${raw.roads.filter((r) => r.blockCause === 'flood').length} flood-intersection / ${raw.roads.filter((r) => r.blockCause === 'debris').length} debris-proxy draws) · NOT an OSM network`}
           />
           <LayerRow
             icon={<Users className="h-3 w-3 text-emerald-400" />}
-            name="Population grid"
-            detail={`${fmtInt(raw.popGrid.length)} cells @ ~300 m · WorldPop-style UN-adjusted (simulated) · total ${fmtInt(raw.totalPop)}`}
+            name="Population grid (generated)"
+            detail={`${fmtInt(raw.popGrid.length)} cells @ ~300 m · synthetic 2-centre Gaussian grid — illustrative, NOT WorldPop · nominal total ${fmtInt(raw.totalPop)}`}
           />
           <LayerRow
             icon={<Building className="h-3 w-3 text-sky-400" />}
             name="H3 priority zones"
-            detail={`${decision.zones.length} hexagons @ res 8 (~0.74 km²) · need-score weights tunable`}
+            detail={`${decision.zones.length} hexagons @ res 8 (~0.74 km²) · need-score weights tunable (uncalibrated heuristic)`}
           />
           <LayerRow
             icon={<Building className="h-3 w-3 text-red-400" />}
-            name="Review labels"
-            detail={`${reviewDecisions.size} analyst decisions · corrections feed the active-learning loop (the moat)`}
+            name="Review labels (ephemeral demo state)"
+            detail={`${reviewDecisions.size} analyst decisions — in-browser only for this static demo: NOT persisted across reloads, and NO model trains on them (no training path exists)`}
           />
         </div>
       </div>
 
       <p className="text-[9px] text-zinc-600 leading-relaxed font-mono">
-        Base map: Esri World Imagery / CARTO dark (attribution in map footer).
+        Base map: Esri World Imagery / CARTO dark (attribution in map footer) — tiles only,
+        no event imagery.
         {isDemo
-          ? ' Demo labels every artifact with its source, timestamp, sensor, resolution, quality flags, license class, and processing version.'
+          ? ' This demo records the provenance fields (sensor, date, resolution, license, processing) as ILLUSTRATIVE records; in the local pilot, real catalog artifacts carry source, timestamp, license, checksum, and quality notes.'
           : ' Every artifact in the catalog carries source, timestamp, license, checksum, and quality notes — see the Data tab of the API catalog.'}
       </p>
     </div>

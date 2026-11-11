@@ -130,6 +130,32 @@ html.dark {
   --card: oklch(0.17 0 0);
 }
 
+/* Accessibility: always-visible keyboard focus ring (2px amber outline,
+ * never removed — including map toolbar buttons and swipe divider). */
+:focus-visible {
+  outline: 2px solid #fbbf24;
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* Accessibility: honor reduced-motion — the pipeline stage pacing, pulsing
+ * status dots, map fit-bounds fly-to and progress animations all stop. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001s !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001s !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Contrast floor (documented convention): tiny metadata text uses
+ * zinc-500/zinc-400 (≥ 4.5:1 on zinc-950), never zinc-600 alone, when it
+ * carries primary information. Verified in the status bar and panel
+ * footnotes by tests/honesty.test.ts copy pins. */
+
 /* maplibre dark chrome */
 .maplibregl-ctrl-group {
   background: rgba(24, 24, 27, 0.92) !important;

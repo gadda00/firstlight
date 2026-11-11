@@ -57,22 +57,23 @@ export function ExportPanel() {
           EXPORT LAYER
         </div>
         <p className="text-[10px] leading-relaxed text-zinc-500">
-          Standard exports: GeoJSON, CSV, sitrep markdown, audit trail — per the
-          evidence workflow (blueprint §7). Every download carries provenance and
-          the demo-data disclaimer.
+          Every file below is a <b>simulated-exercise artifact</b>: machine-readable
+          <code className="mx-0.5">simulated:true</code> + scenario ID + seed, and a
+          human-readable warning. No real satellite imagery was processed to
+          produce them.
         </p>
       </div>
 
       <ExportCard
         icon={<Map className="h-4 w-4 text-red-400" />}
-        title="Building damage · damage.geojson"
-        desc={`${s.destroyed + s.major + s.minor} damage detections (post-review) with class, confidence, zone, provenance`}
+        title="Building damage (generated) · damage.geojson"
+        desc={`${s.destroyed + s.major + s.minor} generated damage labels (post-review) with class, scenario score, zone, provenance`}
         onDownload={() => downloadJSON(`firstlight-${slug}-damage.geojson`, damageGeoJSON(raw, overrides))}
       />
       <ExportCard
         icon={<Map className="h-4 w-4 text-sky-400" />}
         title="Flood extent · flood.geojson"
-        desc={raw.floods.length ? `${s.floodedAreaKm2.toFixed(1)} km² across ${raw.floods.length} SAR polygons` : 'no flood polygons in this event'}
+        desc={raw.floods.length ? `${s.floodedAreaKm2.toFixed(1)} km² across ${raw.floods.length} generated polygons (no imagery processed)` : 'no flood polygons in this scenario'}
         disabled={!raw.floods.length}
         onDownload={() => downloadJSON(`firstlight-${slug}-flood.geojson`, floodGeoJSON(raw))}
       />
@@ -80,13 +81,13 @@ export function ExportPanel() {
         icon={<FileJson className="h-4 w-4 text-amber-400" />}
         title="H3 priority zones · zones.geojson"
         desc={`${decision.zones.length} zones with need, tier, D/Pexp/Iso/Crit components`}
-        onDownload={() => downloadJSON(`firstlight-${slug}-zones.geojson`, zonesGeoJSON(decision))}
+        onDownload={() => downloadJSON(`firstlight-${slug}-zones.geojson`, zonesGeoJSON(decision, raw))}
       />
       <ExportCard
         icon={<FileSpreadsheet className="h-4 w-4 text-emerald-400" />}
-        title="Ranked zones · zones.csv"
-        desc="Ranked queue with all component scores — spreadsheet-ready"
-        onDownload={() => downloadText(`firstlight-${slug}-zones.csv`, zonesCSV(decision), 'text/csv')}
+        title="Ranked zones (generated) · zones.csv"
+        desc="Ranked queue with all component scores + simulated/scenario_id columns — spreadsheet-ready"
+        onDownload={() => downloadText(`firstlight-${slug}-zones.csv`, zonesCSV(decision, raw), 'text/csv')}
       />
       <ExportCard
         icon={<FileJson className="h-4 w-4 text-zinc-300" />}
@@ -96,10 +97,10 @@ export function ExportPanel() {
       />
       <ExportCard
         icon={<FileJson className="h-4 w-4 text-amber-300" />}
-        title="Dispatch routes · routes.geojson"
-        desc={routes.length ? `${routes.length} computed routes with ETA & confidence flags` : 'no routes computed yet (see Access tab)'}
+        title="Tabletop routes · routes.geojson"
+        desc={routes.length ? `${routes.length} toy-graph exercise routes with ETA, scenario scores & field-verification flags` : 'no routes computed yet (see Access tab)'}
         disabled={!routes.length}
-        onDownload={() => downloadJSON(`firstlight-${slug}-routes.geojson`, routesGeoJSON(routes))}
+        onDownload={() => downloadJSON(`firstlight-${slug}-routes.geojson`, routesGeoJSON(routes, raw))}
       />
       <ExportCard
         icon={<FileText className="h-4 w-4 text-zinc-200" />}
@@ -120,13 +121,13 @@ export function ExportPanel() {
       <ExportCard
         icon={<ShieldCheck className="h-4 w-4 text-emerald-300" />}
         title="Audit trail · audit.json"
-        desc="Run metadata, review decisions, tool assertions, human sign-off state"
+        desc="Run metadata, review decisions, tool assertions, FNV-1a demo checksums (non-cryptographic, honestly labeled)"
         onDownload={() => downloadJSON(`firstlight-${slug}-audit.json`, auditTrail(bundleCtx))}
       />
       <ExportCard
         icon={<Package className="h-4 w-4 text-amber-400" />}
-        title="Offline field bundle · bundle.json"
-        desc="All layers + sitrep + audit in one file — air-gapped field deployment mode"
+        title="Offline bundle · bundle.json"
+        desc="All generated layers + sitrep + audit in one clearly-synthetic file — single-file exercise artifact"
         highlight
         onDownload={() =>
           downloadJSON(`firstlight-${slug}-offline-bundle.json`, offlineBundle(bundleCtx))

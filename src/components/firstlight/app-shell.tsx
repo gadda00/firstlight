@@ -4,11 +4,13 @@
 'use client';
 
 import dynamic from 'next/dynamic';
-import { FileSearch, Grid3x3, Route, FileText, ClipboardCheck, Download, Database, CircleDot } from 'lucide-react';
+import { BookOpen, FileSearch, Grid3x3, Route, FileText, ClipboardCheck, Download, Database, CircleDot } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Header } from './header';
 import { MapToolbar } from './map-toolbar';
 import { PipelineOverlay } from './pipeline-overlay';
+import { SimulatedBanner } from './simulated-banner';
+import { FirstUseIntro } from './first-use';
 import { OverviewPanel } from './panels/overview';
 import { ZonesPanel } from './panels/zones';
 import { AccessPanel } from './panels/access';
@@ -16,6 +18,7 @@ import { SitrepPanel } from './panels/sitrep';
 import { ReviewPanel } from './panels/review';
 import { ExportPanel } from './panels/export';
 import { DataPanel } from './panels/data';
+import { GuidePanel } from './panels/guide';
 import { OperationalReviewPanel } from './panels/op-review';
 import { OperationalSitrepPanel } from './panels/op-sitrep';
 import { OperationalExportPanel } from './panels/op-export';
@@ -41,7 +44,9 @@ export function AppShell() {
 
   return (
     <div className="min-h-screen lg:h-screen flex flex-col bg-zinc-950 text-zinc-100 overflow-hidden">
+      {isDemo && <SimulatedBanner />}
       <Header />
+      <FirstUseIntro />
       <main className="flex-1 min-h-0 flex flex-col lg:flex-row">
         {/* map column */}
         <section className="flex flex-col min-h-[54vh] lg:min-h-0 flex-1 border-b lg:border-b-0 lg:border-r border-zinc-800/80">
@@ -68,6 +73,7 @@ export function AppShell() {
               />
               <TabTrigger value="export" icon={<Download className="h-3.5 w-3.5" />} label="Export" />
               <TabTrigger value="data" icon={<Database className="h-3.5 w-3.5" />} label="Data" />
+              <TabTrigger value="guide" icon={<BookOpen className="h-3.5 w-3.5" />} label="Guide" />
             </TabsList>
             <div className="flex-1 min-h-0 overflow-y-auto fl-scroll">
               <TabsContent value="overview" className="m-0">
@@ -90,6 +96,9 @@ export function AppShell() {
               </TabsContent>
               <TabsContent value="data" className="m-0">
                 <DataPanel />
+              </TabsContent>
+              <TabsContent value="guide" className="m-0">
+                <GuidePanel />
               </TabsContent>
             </div>
           </Tabs>
@@ -122,9 +131,12 @@ function TabTrigger({
         alert ? 'text-amber-400' : ''
       }`}
     >
+      {/* sr-only label keeps the tab name accessible to screen readers on
+       * narrow viewports where the visible label is icon-only. */}
       <span className="flex items-center gap-1 min-w-0 justify-center">
         {icon}
-        <span className="hidden sm:inline">{label}</span>
+        <span aria-hidden="true" className="hidden sm:inline">{label}</span>
+        <span className="sm:hidden sr-only">{label}</span>
         {typeof count === 'number' && count > 0 && (
           <span
             className={`text-[9px] font-mono rounded px-1 ${
@@ -150,14 +162,17 @@ function StatusBar() {
   const layerProvenance = useFirstLight((s) => s.layerProvenance);
   const isDemo = demoModeEnabled();
 
-  const stageTotal = raw?.stages.reduce((a, st) => a + st.ms, 0) ?? 0;
   const blocked = raw?.roads.filter((r) => r.blocked).length ?? 0;
 
   return (
-    <footer className="shrink-0 border-t border-zinc-800/80 bg-zinc-950 px-3 py-1.5 flex items-center gap-3 text-[9px] font-mono text-zinc-600 overflow-x-auto whitespace-nowrap">
+    <footer className="shrink-0 border-t border-zinc-800/80 bg-zinc-950 px-3 py-1.5 flex items-center gap-3 text-[9px] font-mono text-zinc-500 overflow-x-auto whitespace-nowrap">
       <span className="flex items-center gap-1 text-emerald-500">
         <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-        {phase === 'running' ? 'PROCESSING' : 'ONLINE'}
+        {isDemo
+          ? 'GENERATED DATA'
+          : phase === 'running'
+            ? 'PROCESSING'
+            : 'ONLINE'}
       </span>
       {serverError && (
         <span className="text-red-400 border border-red-500/30 bg-red-500/10 rounded px-1.5 py-px">
@@ -187,7 +202,7 @@ function StatusBar() {
           )}
           {isDemo && (
             <span className="hidden md:inline">
-              pipeline {(stageTotal / 1000).toFixed(1)}s demo-scaled
+              stage pacing = UI animation, not telemetry
             </span>
           )}
         </>
@@ -196,10 +211,10 @@ function StatusBar() {
       <span className="hidden lg:inline">{runId}</span>
       <span>
         {isDemo
-          ? 'FirstLight v2.2 · simulated demo data'
+          ? 'FirstLight v2.3 · SIMULATED EXERCISE — no operational use'
           : layerProvenance?.simulated
-            ? 'FirstLight v2.2 · OPERATIONAL · real-data catalog + SYNTHETIC analysis (labeled)'
-            : 'FirstLight v2.2 · OPERATIONAL · server-built data'}
+            ? 'FirstLight v2.3 · OPERATIONAL · real-data catalog + SYNTHETIC analysis (labeled)'
+            : 'FirstLight v2.3 · OPERATIONAL · server-built data'}
       </span>
       <span className="hidden md:inline">
         © OpenStreetMap contributors · Esri · CARTO
