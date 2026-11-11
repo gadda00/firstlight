@@ -57,7 +57,9 @@ export function Header() {
               </Badge>
             </div>
             <span className="hidden md:block text-[9px] font-semibold tracking-[0.22em] text-zinc-500 mt-1">
-              SIMULATED DISASTER-INTELLIGENCE EXERCISE
+              {isDemo
+                ? 'SIMULATED DISASTER INTELLIGENCE EXERCISE'
+                : 'OPERATIONAL DISASTER INTELLIGENCE PILOT'}
             </span>
           </div>
         </div>

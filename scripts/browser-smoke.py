@@ -281,7 +281,7 @@ def main() -> int:
         page.wait_for_selector("text=FirstLight", timeout=30_000)
         time.sleep(4)
         check("browser renders the app shell after login", page.locator("text=DISASTER INTELLIGENCE").count() > 0)
-        check("header shows OPERATIONAL badge", page.locator("text=v2.2 OPERATIONAL").count() > 0)
+        check("header shows OPERATIONAL badge", page.locator("text=v2.3 OPERATIONAL").count() > 0)
         # v2.2 wiring: the shell now loads SERVER data after login —
         # most-recent event layer → status bar + header session chip.
         check("header shows the signed-in user chip", page.locator("text=Dana Okafor").count() > 0)
